@@ -1,0 +1,70 @@
+export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onUpdate }) {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': window.location.origin,
+      'X-OpenRouter-Title': 'Leaf',
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.error?.message || `OpenRouter returned ${response.status}.`)
+  }
+
+  if (!response.body) throw new Error('This browser cannot stream the OpenRouter response.')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let manuscript = ''
+  let complete = false
+
+  const readLine = (line) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return false
+    const data = trimmed.slice(5).trim()
+    if (!data) return false
+    if (data === '[DONE]') return true
+
+    let event
+    try {
+      event = JSON.parse(data)
+    } catch {
+      return false
+    }
+    const text = event.choices?.[0]?.delta?.content
+    if (typeof text === 'string') {
+      manuscript += text
+      onUpdate(manuscript)
+    }
+    return false
+  }
+
+  try {
+    while (!complete) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (readLine(line)) {
+          complete = true
+          break
+        }
+      }
+      if (done) {
+        if (buffer) readLine(buffer)
+        complete = true
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  if (!manuscript.trim()) throw new Error('The selected model returned an empty draft.')
+  return manuscript.trim()
+}

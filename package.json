@@ -1,0 +1,22 @@
+{
+  "name": "leaf-ereader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "epubjs": "^0.3.93",
+    "fflate": "^0.8.3",
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.8.15"
+  }
+}
