@@ -2,7 +2,6 @@ import ePub from 'epubjs'
 import {
   createIcons,
   AlignLeft,
-  ArrowLeft,
   BookOpen,
   BookPlus,
   Bookmark,
@@ -10,10 +9,12 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eye,
   EyeOff,
   Library,
   ListPlus,
+  Plus,
   RotateCcw,
   Save,
   Search,
@@ -22,13 +23,13 @@ import {
   Trash2,
   X,
 } from 'lucide'
-import { streamOpenRouter } from './ai.js'
+import { generateOpenRouterImage, streamOpenRouter } from './ai.js'
 import { createEpub } from './epub.js'
+import { createUuid } from './id.js'
 import './style.css'
 
 const iconSet = {
   AlignLeft,
-  ArrowLeft,
   BookOpen,
   BookPlus,
   Bookmark,
@@ -36,10 +37,12 @@ const iconSet = {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eye,
   EyeOff,
   Library,
   ListPlus,
+  Plus,
   RotateCcw,
   Save,
   Search,
@@ -49,7 +52,7 @@ const iconSet = {
   X,
 }
 
-const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper' }
+const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper-white' }
 const readerFonts = {
   serif: 'Georgia, serif',
   soft: 'Palatino Linotype, Book Antiqua, Palatino, serif',
@@ -60,20 +63,42 @@ const readerFonts = {
   trebuchet: 'Trebuchet MS, sans-serif',
 }
 const readerThemes = {
-  paper: { background: '#fbfaf6', color: '#292e2a', screen: '#f4f5f0', toolbar: '#fbfcf8', border: '#e8e7dc' },
-  light: { background: '#ffffff', color: '#27313a', screen: '#f1f4f6', toolbar: '#fbfcfd', border: '#d9e0e5' },
-  warm: { background: '#2e271f', color: '#f2e5d2', screen: '#251f18', toolbar: '#30271f', border: '#4a3d30', dark: true },
-  sage: { background: '#1d2b23', color: '#e0eee3', screen: '#17231c', toolbar: '#1f2d25', border: '#394b3d', dark: true },
-  night: { background: '#202724', color: '#e4e9e1', screen: '#1a201d', toolbar: '#202724', border: '#39433d', dark: true },
-  dark: { background: '#111318', color: '#edf0f5', screen: '#101216', toolbar: '#171a20', border: '#353a43', dark: true },
-  rose: { background: '#32202a', color: '#f1e5eb', screen: '#281a22', toolbar: '#35232d', border: '#573a49', dark: true },
-  sky: { background: '#172b38', color: '#e2eff5', screen: '#13222c', toolbar: '#1a303d', border: '#385362', dark: true },
-  lavender: { background: '#282338', color: '#eee8f5', screen: '#211d2e', toolbar: '#2d2740', border: '#463d5b', dark: true },
-  slate: { background: '#e7ebea', color: '#303938', screen: '#eff2f1', toolbar: '#fafbfa', border: '#d9e0de' },
-  mint: { background: '#dcf3e5', color: '#263e31', screen: '#eaf6ee', toolbar: '#f8fcf9', border: '#c5dfcd' },
-  lemon: { background: '#fff2bd', color: '#473b1c', screen: '#fbf5db', toolbar: '#fffaf0', border: '#e8dca9' },
-  berry: { background: '#f2d8e9', color: '#45283d', screen: '#f6e8f1', toolbar: '#fff9fc', border: '#e1c3d7' },
-  coral: { background: '#f9ded3', color: '#4a302a', screen: '#faeee9', toolbar: '#fffaf8', border: '#e8cbc0' },
+  'paper-white': { background: '#FAF9F6', color: '#242424' },
+  'warm-ivory': { background: '#FFF8E7', color: '#2E281F' },
+  'classic-parchment': { background: '#F4E8D2', color: '#332B20' },
+  'vintage-sepia': { background: '#EAD8B5', color: '#382B1E' },
+  'oat-milk': { background: '#EEE4D3', color: '#302C27' },
+  'cloud-gray': { background: '#F1F3F5', color: '#262A30' },
+  'warm-gray': { background: '#E7E2DC', color: '#2D2925' },
+  'peach-bloom': { background: '#FBE4D5', color: '#422B24' },
+  'rose-blush': { background: '#F6E1E7', color: '#3D2930' },
+  'lavender-mist': { background: '#EEE7F8', color: '#2F2940' },
+  'powder-blue': { background: '#E6F1F8', color: '#22313B' },
+  'mint-leaf': { background: '#E3F2E8', color: '#23342B' },
+  'sage-garden': { background: '#DEE8DC', color: '#283328' },
+  'lemon-cream': { background: '#FAF3CE', color: '#38311B' },
+  'terracotta-paper': { background: '#F2DDD3', color: '#462D25' },
+  'soft-charcoal': { background: '#1E2024', color: '#E9E6DF', dark: true },
+  'true-night': { background: '#121212', color: '#EAE7E2', dark: true },
+  'midnight-navy': { background: '#172235', color: '#E5ECF6', dark: true },
+  'forest-night': { background: '#1B2A24', color: '#E4EEE6', dark: true },
+  'midnight-plum': { background: '#2B202F', color: '#F2E8F4', dark: true },
+}
+const legacyReaderThemeAliases = {
+  paper: 'paper-white',
+  light: 'cloud-gray',
+  warm: 'soft-charcoal',
+  sage: 'midnight-plum',
+  night: 'soft-charcoal',
+  dark: 'true-night',
+  rose: 'midnight-plum',
+  sky: 'midnight-navy',
+  lavender: 'midnight-plum',
+  slate: 'warm-gray',
+  mint: 'oat-milk',
+  lemon: 'lemon-cream',
+  berry: 'rose-blush',
+  coral: 'terracotta-paper',
 }
 
 function loadReaderPreferences() {
@@ -83,10 +108,14 @@ function loadReaderPreferences() {
     const size = Number(preferences.fontSize)
     const lineHeight = Number(preferences.lineHeight)
     return {
-      fontSize: Number.isFinite(size) ? Math.min(160, Math.max(80, size)) : readerPreferenceDefaults.fontSize,
+      fontSize: Number.isFinite(size) ? Math.min(160, Math.max(100, size)) : readerPreferenceDefaults.fontSize,
       font: Object.hasOwn(readerFonts, preferences.font) ? preferences.font : readerPreferenceDefaults.font,
       lineHeight: [1.5, 1.75, 2].includes(lineHeight) ? lineHeight : readerPreferenceDefaults.lineHeight,
-      theme: Object.hasOwn(readerThemes, preferences.theme) ? preferences.theme : readerPreferenceDefaults.theme,
+      theme: Object.hasOwn(readerThemes, preferences.theme)
+        ? preferences.theme
+        : Object.hasOwn(legacyReaderThemeAliases, preferences.theme)
+          ? legacyReaderThemeAliases[preferences.theme]
+          : readerPreferenceDefaults.theme,
     }
   } catch {
     return { ...readerPreferenceDefaults }
@@ -126,22 +155,23 @@ const state = {
   writer: createWriterState(),
 }
 let saveTimer
-let writerAutosaveTimer
+let writerAutosaveTimer = null
+const writerAutosaveTasks = new Set()
 
 app.innerHTML = `
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="#library" aria-label="Leaf home">
-        <span class="brand__mark"><i data-lucide="book-open"></i></span>
-        <span class="brand__word">leaf<span>.</span></span>
-      </a>
       <div class="sidebar__label">YOUR SPACE</div>
+      <div class="mobile-page-title" id="mobile-page-title">Library</div>
       <nav class="sidebar-nav" aria-label="Main navigation">
         <button class="sidebar-nav__item sidebar-nav__item--active" type="button" id="library-nav" title="My library">
           <i data-lucide="library"></i><span>My library</span><span class="nav-count" id="nav-count">0</span>
         </button>
         <button class="sidebar-nav__item" type="button" id="writer-nav" title="AI writing room">
           <i data-lucide="sparkles"></i><span>AI writing room</span>
+        </button>
+        <button class="sidebar-nav__item sidebar-nav__add" type="button" id="upload-button" aria-label="Add a book" title="Add a book">
+          <i data-lucide="plus"></i><span>Add a book</span>
         </button>
       </nav>
     </aside>
@@ -151,18 +181,10 @@ app.innerHTML = `
         <header class="topbar">
           <div class="topbar__tools">
             <label class="search-box"><i data-lucide="search"></i><input id="search-input" type="search" placeholder="Find a book" aria-label="Find a book" /></label>
-            <button class="button button--primary" type="button" id="upload-button"><i data-lucide="plus"></i><span>Add a book</span></button>
           </div>
         </header>
 
         <div class="library-content">
-          <section class="continue-section" id="continue-section" aria-label="Continue reading"></section>
-
-          <section class="shelf-section writer-draft-section" id="writer-draft-section" aria-labelledby="writer-drafts-title" hidden>
-            <div class="section-heading"><div><h2 id="writer-drafts-title">Unfinished drafts</h2><span class="section-count" id="writer-draft-count"></span></div><span class="section-heading__rule"></span></div>
-            <div class="writer-drafts" id="writer-drafts"></div>
-          </section>
-
           <section class="shelf-section" aria-labelledby="shelf-title">
             <div class="section-heading"><div><h2 id="shelf-title">On your shelf</h2><span class="section-count" id="book-count">0 books</span></div><span class="section-heading__rule"></span></div>
             <div class="book-grid" id="book-grid"></div>
@@ -172,39 +194,36 @@ app.innerHTML = `
               <p>Add an EPUB to make this shelf yours.</p>
               <button class="button button--outline" type="button" id="empty-upload"><i data-lucide="plus"></i><span>Choose an EPUB</span></button>
             </div>
-            <div class="no-results" id="no-results" hidden>No books or drafts match that search.</div>
+            <div class="no-results" id="no-results" hidden>No books match that search.</div>
           </section>
-          <footer class="library-footer"><span>LEAF READING ROOM</span><span>Good things take a chapter.</span></footer>
         </div>
       </section>
 
       <section class="writer-screen" id="writer-screen" hidden>
         <div class="writer-content">
-          <div class="writer-heading">
-            <div><h1>AI book writer</h1><p class="writer-autosave-status" id="writer-autosave-status" role="status" aria-live="polite">Unfinished drafts save automatically in this browser.</p></div>
-            <button class="button button--outline" type="button" id="writer-new-draft" title="Save the current work and start another draft">New draft</button>
-          </div>
-          <section class="writer-library-loader" aria-labelledby="writer-library-loader-title">
+          <section class="writer-library-loader" id="writer-library-loader" aria-labelledby="writer-library-loader-title">
             <div class="writer-library-loader__copy">
               <h2 id="writer-library-loader-title">Edit a book from your library</h2>
-              <p>Load any saved or uploaded EPUB into the chapter editor. Saving creates a separate draft, so the original stays untouched.</p>
+              <p>Load a saved book or resume an unfinished draft in the chapter editor.</p>
             </div>
-            <label class="writer-field" for="writer-library-book">Book from your library
-              <select id="writer-library-book"><option value="">Choose a book...</option></select>
+            <label class="writer-field" for="writer-library-book">Book or draft
+              <select id="writer-library-book"><option value="">Choose a book or draft...</option></select>
             </label>
-            <button class="button button--outline" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
+            <div class="writer-library-loader__actions">
+              <button class="button button--outline" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
+              <button class="icon-button" type="button" id="delete-writer-draft" aria-label="Delete selected draft" title="Delete selected draft" hidden><i data-lucide="trash-2"></i></button>
+            </div>
           </section>
           <div class="writer-wizard">
             <ol class="writer-progress" aria-label="AI writing walkthrough">
               <li data-wizard-indicator="1"><span>01</span><span>AI fields</span></li>
-              <li data-wizard-indicator="2"><span>02</span><span>Prompt</span></li>
-              <li data-wizard-indicator="3"><span>03</span><span>Chapters</span></li>
-              <li data-wizard-indicator="4"><span>04</span><span>Draft</span></li>
-              <li data-wizard-indicator="5"><span>05</span><span>Save</span></li>
+              <li data-wizard-indicator="2" hidden><span>02</span><span>Prompt</span></li>
+              <li data-wizard-indicator="3" hidden><span>03</span><span>Chapters</span></li>
+              <li data-wizard-indicator="4" hidden><span>04</span><span>Draft</span></li>
+              <li data-wizard-indicator="5" hidden><span>05</span><span>Save</span></li>
             </ol>
 
             <section class="writer-wizard-panel" data-wizard-panel="1" aria-labelledby="wizard-connection-title">
-              <div class="writer-step">01 <span>AI FIELDS</span></div>
               <h2 id="wizard-connection-title">Connect your AI</h2>
               <p class="writer-panel-copy">Choose the model that will suggest chapters and help write your book.</p>
               <div class="writer-wizard-fields">
@@ -230,7 +249,6 @@ app.innerHTML = `
             </section>
 
             <section class="writer-wizard-panel" data-wizard-panel="2" aria-labelledby="wizard-prompt-title" hidden>
-              <div class="writer-step">02 <span>BOOK PROMPT</span></div>
               <h2 id="wizard-prompt-title">What would you like to read?</h2>
               <p class="writer-panel-copy">Describe the book you have in mind. The AI will use it to shape the chapter suggestions.</p>
               <div class="writer-wizard-fields">
@@ -238,7 +256,7 @@ app.innerHTML = `
                   <textarea id="book-topic" rows="5" placeholder="A botanist inherits a greenhouse that grows memories..." required></textarea>
                 </label>
                 <label class="writer-field" for="page-count">Pages
-                  <input id="page-count" type="number" min="1" max="30" value="8" required />
+                  <input id="page-count" type="number" min="1" value="8" required />
                 </label>
                 <p class="writer-help">About 200 words per page. Length varies by model.</p>
                 <button class="button button--primary writer-generate" type="button" id="generate-button"><i data-lucide="list-plus"></i><span>Suggest chapters</span></button>
@@ -246,11 +264,9 @@ app.innerHTML = `
             </section>
 
             <section class="writer-wizard-panel" data-wizard-panel="3" aria-labelledby="wizard-outline-title" hidden>
-              <div class="writer-step">03 <span>CHAPTER SUGGESTIONS</span></div>
               <h2 id="wizard-outline-title">Shape the chapter suggestions</h2>
-              <p class="writer-panel-copy">Ask the AI for changes or edit, reorder, and remove titles yourself.</p>
               <label class="writer-field" for="outline-revision-request">How should the AI change these suggestions?
-                <textarea id="outline-revision-request" rows="2" spellcheck="true" placeholder="Make the middle chapters build more suspense..."></textarea>
+              <textarea id="outline-revision-request" rows="2" spellcheck="true" placeholder="Make the middle chapters build more suspense..."></textarea>
               </label>
               <button class="button button--outline outline-revise" type="button" id="revise-outline"><i data-lucide="sparkles"></i><span>Revise suggestions with AI</span></button>
               <label class="writer-field" for="chapter-outline">Chapter titles, one per line
@@ -259,7 +275,6 @@ app.innerHTML = `
             </section>
 
             <section class="writer-wizard-panel" data-wizard-panel="4" aria-labelledby="manuscript-title" hidden>
-              <div class="writer-step">04 <span>CHAPTER TEXT</span></div>
               <div class="manuscript-heading">
                 <div><h2 id="manuscript-title">Adjust your chapter text</h2><p id="draft-stats">Your chapter suggestions are ready.</p></div>
               </div>
@@ -282,17 +297,37 @@ app.innerHTML = `
             </section>
 
             <section class="writer-wizard-panel" data-wizard-panel="5" aria-labelledby="wizard-details-title" hidden>
-              <div class="writer-step">05 <span>BOOK DETAILS</span></div>
               <h2 id="wizard-details-title">Get your book ready</h2>
-              <p class="writer-panel-copy">Choose how your book will appear on your shelf, then save it to your library.</p>
               <div class="manuscript-meta">
                 <label class="writer-field" for="book-title">Title<input id="book-title" type="text" placeholder="Filled from the suggestions" /></label>
                 <label class="writer-field" for="book-author">Author<input id="book-author" type="text" placeholder="Your name or pen name" /></label>
               </div>
-              <div class="cover-upload">
-                <label class="writer-field" for="cover-input">Custom cover<input id="cover-input" type="file" accept="image/png,image/jpeg" /></label>
-                <img id="cover-preview" alt="Custom book cover preview" hidden />
-                <button class="icon-button" type="button" id="remove-cover" aria-label="Remove custom cover" title="Remove custom cover" hidden><i data-lucide="x"></i></button>
+              <div class="cover-card">
+                <div class="cover-card__artwork">
+                  <div class="cover-card__placeholder" id="cover-placeholder">
+                    <i data-lucide="image"></i>
+                    <span>Cover preview</span>
+                    <small>Portrait works best</small>
+                  </div>
+                  <img id="cover-preview" alt="Custom book cover preview" hidden />
+                  <div class="cover-title-overlay" id="cover-title-overlay" hidden></div>
+                </div>
+                <div class="cover-card__content">
+                  <div class="cover-card__heading">
+                    <span class="cover-card__eyebrow">OPTIONAL BOOK ART</span>
+                    <h3>Custom cover</h3>
+                    <p>Upload artwork or create an AI cover with your book title included.</p>
+                  </div>
+                  <div class="cover-card__actions">
+                    <label class="button button--outline cover-card__upload" for="cover-input">
+                      <i data-lucide="upload"></i><span>Upload image</span>
+                      <input id="cover-input" class="cover-card__file" type="file" accept="image/png,image/jpeg" aria-label="Upload a PNG or JPEG cover image" />
+                    </label>
+                    <button class="button button--primary" type="button" id="generate-cover"><i data-lucide="sparkles"></i><span>Generate with AI</span></button>
+                  </div>
+                  <p class="cover-card__note">PNG or JPEG · AI generation uses your OpenRouter key; provider charges may apply.</p>
+                  <button class="cover-card__remove" type="button" id="remove-cover" hidden><i data-lucide="x"></i><span>Remove cover</span></button>
+                </div>
               </div>
               <button class="button button--primary writer-save" type="button" id="save-draft" disabled><i data-lucide="save"></i><span>Save to library</span></button>
             </section>
@@ -309,45 +344,62 @@ app.innerHTML = `
 
       <section class="reader-screen" id="reader-screen" hidden>
         <header class="reader-toolbar">
-          <button class="icon-button" type="button" id="back-button" aria-label="Back to library" title="Back to library"><i data-lucide="arrow-left"></i></button>
-          <div class="reader-book-title"><span class="reader-book-title__label">NOW READING</span><b id="reader-title">Book title</b></div>
+          <button class="icon-button reader-back-button" type="button" id="back-button" aria-label="Back to library" title="Back to library"><i data-lucide="chevron-left"></i></button>
+          <div class="reader-book-title"><b id="reader-title">Book title</b><span class="reader-book-title__author" id="reader-author"></span></div>
           <div class="reader-tools">
             <button class="icon-button" type="button" id="toc-button" aria-label="Table of contents" title="Table of contents"><i data-lucide="align-left"></i></button>
             <button class="icon-button" type="button" id="bookmarks-button" aria-label="Saved bookmarks" title="Saved bookmarks" aria-expanded="false" aria-controls="bookmark-panel"><i data-lucide="bookmark-check"></i></button>
-            <span class="toolbar-divider"></span>
             <button class="icon-button" type="button" id="reader-settings-button" aria-label="Reading settings" title="Reading settings" aria-expanded="false" aria-controls="reader-settings"><i data-lucide="sliders-horizontal"></i></button>
           </div>
         </header>
         <aside class="reader-settings" id="reader-settings" aria-label="Reading settings" hidden>
           <div class="reader-settings__header"><h2>Reading settings</h2><div><button class="reader-settings__reset" type="button" id="reset-reader-settings"><i data-lucide="rotate-ccw"></i><span>Reset</span></button><button class="icon-button" type="button" id="close-reader-settings" aria-label="Close reading settings"><i data-lucide="x"></i></button></div></div>
-          <label class="reader-setting" for="reader-font-size"><span>Text size <output id="reader-font-size-value">100%</output></span><input id="reader-font-size" type="range" min="80" max="160" step="5" value="100" /></label>
+          <label class="reader-setting" for="reader-font-size"><span>Text size <output id="reader-font-size-value">100%</output></span><input id="reader-font-size" type="range" min="100" max="160" step="5" value="100" /></label>
           <label class="reader-setting" for="reader-font-family"><span>Typeface</span><select id="reader-font-family"><option value="serif">Georgia</option><option value="soft">Palatino</option><option value="garamond">Garamond</option><option value="bookman">Bookman</option><option value="sans">Arial</option><option value="verdana">Verdana</option><option value="trebuchet">Trebuchet</option></select></label>
           <label class="reader-setting" for="reader-line-height"><span>Line spacing</span><select id="reader-line-height"><option value="1.5">Compact</option><option value="1.75" selected>Relaxed</option><option value="2">Open</option></select></label>
+          <div class="reader-font-preview" id="reader-font-preview">
+            <span class="reader-font-preview__label">Preview</span>
+            <p id="reader-font-preview-text">The quick brown fox jumps over the lazy dog.</p>
+          </div>
           <fieldset class="reader-theme-picker"><legend>Page color</legend><div class="reader-theme-options">
-            <button class="reader-theme-option" type="button" data-reader-theme="paper" aria-pressed="true"><span class="reader-theme-option__swatch"></span><span>Paper</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="light" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Light</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="warm" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Warm</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="sage" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sage</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="night" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Night</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="dark" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Dark</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="rose" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rose</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="sky" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sky</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="lavender" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lavender</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="slate" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Slate</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="mint" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Mint</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="lemon" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lemon</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="berry" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Berry</span></button>
-            <button class="reader-theme-option" type="button" data-reader-theme="coral" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Coral</span></button>
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Light &amp; paper themes</span><div class="reader-theme-category-options">
+              <button class="reader-theme-option" type="button" data-reader-theme="paper-white" style="--reader-theme-background:#FAF9F6" aria-pressed="true"><span class="reader-theme-option__swatch"></span><span>Paper White</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="warm-ivory" style="--reader-theme-background:#FFF8E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Warm Ivory</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="classic-parchment" style="--reader-theme-background:#F4E8D2" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Classic Parchment</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="vintage-sepia" style="--reader-theme-background:#EAD8B5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Vintage Sepia</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="oat-milk" style="--reader-theme-background:#EEE4D3" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Oat Milk</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="cloud-gray" style="--reader-theme-background:#F1F3F5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Cloud Gray</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="warm-gray" style="--reader-theme-background:#E7E2DC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Warm Gray</span></button>
+            </div></div>
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Soft &amp; colorful themes</span><div class="reader-theme-category-options">
+              <button class="reader-theme-option" type="button" data-reader-theme="peach-bloom" style="--reader-theme-background:#FBE4D5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Peach Bloom</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="rose-blush" style="--reader-theme-background:#F6E1E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rose Blush</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="lavender-mist" style="--reader-theme-background:#EEE7F8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lavender Mist</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="powder-blue" style="--reader-theme-background:#E6F1F8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Powder Blue</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="mint-leaf" style="--reader-theme-background:#E3F2E8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Mint Leaf</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="sage-garden" style="--reader-theme-background:#DEE8DC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sage Garden</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="lemon-cream" style="--reader-theme-background:#FAF3CE" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lemon Cream</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="terracotta-paper" style="--reader-theme-background:#F2DDD3" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Terracotta Paper</span></button>
+            </div></div>
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Dark &amp; immersive themes</span><div class="reader-theme-category-options">
+              <button class="reader-theme-option" type="button" data-reader-theme="soft-charcoal" style="--reader-theme-background:#1E2024" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Soft Charcoal</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="true-night" style="--reader-theme-background:#121212" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>True Night</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="midnight-navy" style="--reader-theme-background:#172235" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Midnight Navy</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="forest-night" style="--reader-theme-background:#1B2A24" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Forest Night</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="midnight-plum" style="--reader-theme-background:#2B202F" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Midnight Plum</span></button>
+            </div></div>
           </div></fieldset>
         </aside>
         <div class="reader-layout">
           <aside class="toc-panel" id="toc-panel" hidden><div class="toc-panel__head"><h2>Contents</h2><button class="icon-button" type="button" id="toc-close" aria-label="Close contents"><i data-lucide="x"></i></button></div><nav id="chapter-list" class="chapter-list"></nav></aside>
-          <aside class="toc-panel bookmark-panel" id="bookmark-panel" hidden><div class="toc-panel__head"><h2>Bookmarks</h2><button class="icon-button" type="button" id="bookmark-close" aria-label="Close bookmarks"><i data-lucide="x"></i></button></div><button class="button button--outline bookmark-current-action" type="button" id="bookmark-current" aria-label="Bookmark this page" title="Bookmark this page" aria-pressed="false">Bookmark this page</button><nav id="bookmark-list" class="chapter-list" aria-label="Saved bookmarks"></nav></aside>
+          <aside class="toc-panel bookmark-panel" id="bookmark-panel" hidden><div class="toc-panel__head"><h2>Bookmarks</h2><button class="icon-button" type="button" id="bookmark-close" aria-label="Close bookmarks"><i data-lucide="x"></i></button></div><button class="icon-button bookmark-current-action" type="button" id="bookmark-current" aria-label="Bookmark this page" title="Bookmark this page" aria-pressed="false"><i data-lucide="bookmark"></i></button><nav id="bookmark-list" class="chapter-list" aria-label="Saved bookmarks"></nav></aside>
           <div class="reader-main">
             <div class="reader-stage">
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
+              <button class="reader-tap-zone reader-tap-zone--prev" type="button" id="reader-prev-zone" aria-label="Previous page"></button>
+              <button class="reader-tap-zone reader-tap-zone--next" type="button" id="reader-next-zone" aria-label="Next page"></button>
             </div>
-            <footer class="reader-footer"><span id="chapter-label">A quiet moment</span><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span></div><span id="progress-label">0%</span></footer>
+            <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label">A quiet moment</span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
           </div>
         </div>
       </section>
@@ -403,20 +455,18 @@ async function loadLibrary() {
 }
 
 const progressFor = (id) => state.progress.find((item) => item.id === id)
-const coverColors = ['#bd6a50', '#607a69', '#d1a15d', '#536777', '#96705d', '#87916b']
+const coverColors = ['#a94f43', '#5a4558', '#3f5266', '#9b704f', '#694550', '#566174']
 const bookCoverUrls = new Map()
 const bookCoverLoads = new Set()
 
 function coverMarkup(book, index) {
   const color = coverColors[index % coverColors.length]
-  const initials = (book.title || 'Book').trim().slice(0, 1).toUpperCase()
-  return `<span class="book-cover" style="--cover-color:${color}" aria-hidden="true"><span class="book-cover__ornament">${initials}</span><span class="book-cover__title">${escapeHtml(book.title || 'Untitled')}</span><span class="book-cover__author">${escapeHtml(book.author || 'Unknown author')}</span><span class="book-cover__spine"></span><img class="book-cover__image" data-book-cover="${escapeHtml(book.id)}" alt="" hidden></span>`
+  return `<span class="book-cover" style="--cover-color:${color}" aria-hidden="true"><span class="book-cover__title">${escapeHtml(book.title || 'Untitled')}</span><span class="book-cover__author">${escapeHtml(book.author || 'Unknown author')}</span><img class="book-cover__image" data-book-cover="${escapeHtml(book.id)}" alt="" hidden></span>`
 }
 
 function showBookCover(image, url) {
   image.src = url
   image.hidden = false
-  if (image.classList.contains('continue-card__cover-image')) image.previousElementSibling.hidden = true
 }
 
 async function loadBookCover(record) {
@@ -462,51 +512,45 @@ function releaseBookCover(id) {
   bookCoverUrls.delete(id)
 }
 
-function renderWriterDrafts() {
-  const query = state.query.trim().toLocaleLowerCase()
-  const drafts = [...state.drafts]
-    .sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt))
-    .filter((draft) => String(draft.title || 'Untitled draft').toLocaleLowerCase().includes(query))
-  $('#writer-draft-count').textContent = `${drafts.length} ${drafts.length === 1 ? 'draft' : 'drafts'}`
-  $('#writer-draft-section').hidden = drafts.length === 0
-  const resumeDisabled = state.writer.busy ? 'disabled' : ''
-  $('#writer-drafts').innerHTML = drafts.map((draft) => {
-    const chapterCount = Number(draft.chapterCount) || 0
-    const wordCount = Number(draft.wordCount) || 0
-    const updatedAt = Number(draft.updatedAt)
-    const updated = Number.isFinite(updatedAt) ? new Date(updatedAt).toLocaleString() : ''
-    return `<article class="writer-draft-card">
-      <div class="writer-draft-card__meta"><b>${escapeHtml(draft.title || 'Untitled draft')}</b><span>${chapterCount} ${chapterCount === 1 ? 'chapter' : 'chapters'} · ${wordCount.toLocaleString()} words${updated ? ` · Updated ${escapeHtml(updated)}` : ''}</span></div>
-      <div class="writer-draft-card__actions">
-        <button class="button button--outline" type="button" data-resume-draft="${escapeHtml(draft.id)}" ${resumeDisabled}>Resume</button>
-        <button class="icon-button" type="button" data-delete-draft="${escapeHtml(draft.id)}" aria-label="Delete draft ${escapeHtml(draft.title || 'Untitled draft')}" title="Delete draft"><i data-lucide="trash-2"></i></button>
-      </div>
-    </article>`
-  }).join('')
-  return drafts.length
+function downloadBook(record) {
+  const filename = String(record.fileName || `${record.title || 'book'}.epub`)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\.epub$/i, '')
+    .trim() || 'book'
+  const url = URL.createObjectURL(new Blob([record.data], { type: 'application/epub+zip' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${filename}.epub`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function renderLibrary() {
   const query = state.query.trim().toLocaleLowerCase()
-  const visibleBooks = state.books.filter((book) => `${book.title} ${book.author}`.toLocaleLowerCase().includes(query))
-  const recent = [...state.books].sort((a, b) => (progressFor(b.id)?.lastOpenedAt || 0) - (progressFor(a.id)?.lastOpenedAt || 0))[0]
-  const recentProgress = recent && progressFor(recent.id)
-  const recentIndex = Math.max(0, state.books.indexOf(recent))
+  const visibleBooks = state.books
+    .filter((book) => `${book.title} ${book.author}`.toLocaleLowerCase().includes(query))
+    .sort((a, b) => (progressFor(b.id)?.lastOpenedAt || b.addedAt || 0) - (progressFor(a.id)?.lastOpenedAt || a.addedAt || 0))
   $('#nav-count').textContent = state.books.length
   $('#book-count').textContent = `${state.books.length} ${state.books.length === 1 ? 'book' : 'books'}`
-  const recentPercent = Math.round(Math.max(0, Math.min(100, Number(recentProgress?.percentage) || 0)))
-  $('#continue-section').innerHTML = recentProgress
-    ? `<button class="continue-card" type="button" data-open="${recent.id}" aria-label="Continue reading ${escapeHtml(recent.title)}"><span class="continue-card__cover" style="--cover-color:${coverColors[recentIndex % coverColors.length]}" aria-hidden="true"><span class="continue-card__cover-fallback">${escapeHtml((recent.title || 'B').trim().slice(0, 1).toUpperCase())}</span><img class="continue-card__cover-image" data-book-cover="${escapeHtml(recent.id)}" alt="" hidden></span><span class="continue-card__copy"><span class="continue-card__label">CONTINUE READING</span><b>${escapeHtml(recent.title)}</b></span><span class="continue-card__progress"><span>${recentPercent}% read</span><span class="continue-card__track"><span style="width:${recentPercent}%"></span></span></span><span class="continue-card__cta"><i data-lucide="chevron-right"></i></span></button>`
-    : ''
   $('#book-grid').innerHTML = visibleBooks.map((book) => {
     const progress = progressFor(book.id)
     const index = state.books.indexOf(book)
-    return `<article class="book-card"><button class="book-card__open" type="button" data-open="${book.id}" aria-label="Read ${escapeHtml(book.title)}">${coverMarkup(book, index)}<span class="book-card__meta"><b>${escapeHtml(book.title)}</b><span>${escapeHtml(book.author || 'Unknown author')}</span>${progress ? `<span class="book-card__read">${progress.percentage || 0}% read</span>` : ''}</span></button><button class="book-card__remove" type="button" data-remove="${book.id}" aria-label="Remove ${escapeHtml(book.title)}" title="Remove book"><i data-lucide="trash-2"></i></button></article>`
+    return `<article class="book-card">
+      <button class="book-card__open" type="button" data-open="${escapeHtml(book.id)}" aria-label="Read ${escapeHtml(book.title)}">
+        ${coverMarkup(book, index)}
+        <span class="book-card__meta"><b>${escapeHtml(book.title)}</b><span>${escapeHtml(book.author || 'Unknown author')}</span>${progress ? `<span class="book-card__read">${progress.percentage || 0}% read</span>` : ''}</span>
+      </button>
+      <div class="book-card__actions">
+        <button class="book-card__action book-card__download" type="button" data-download="${escapeHtml(book.id)}" aria-label="Download ${escapeHtml(book.title)} as EPUB" title="Download EPUB"><i data-lucide="download"></i></button>
+        <button class="book-card__action book-card__remove" type="button" data-remove="${escapeHtml(book.id)}" aria-label="Remove ${escapeHtml(book.title)}" title="Remove book"><i data-lucide="trash-2"></i></button>
+      </div>
+    </article>`
   }).join('')
   loadRenderedBookCovers()
-  const visibleDraftCount = renderWriterDrafts()
-  $('#empty-state').hidden = state.books.length > 0 || state.drafts.length > 0
-  $('#no-results').hidden = (!state.books.length && !state.drafts.length) || visibleBooks.length > 0 || visibleDraftCount > 0
+  $('#empty-state').hidden = state.books.length > 0
+  $('#no-results').hidden = !state.books.length || visibleBooks.length > 0
   icons()
   renderWriterLibraryOptions()
 }
@@ -514,18 +558,33 @@ function renderLibrary() {
 function renderWriterLibraryOptions() {
   const select = $('#writer-library-book')
   const button = $('#load-library-book')
-  if (!select || !button) return
+  const deleteButton = $('#delete-writer-draft')
+  if (!select || !button || !deleteButton) return
 
-  const selectedId = select.value
+  const selectedValue = select.value
   const books = [...state.books].sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
-  select.innerHTML = `<option value="">${books.length ? 'Choose a book...' : 'Your library is empty'}</option>${books.map((book) => {
+  const drafts = [...state.drafts].sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
+  const bookOptions = books.map((book) => {
     const title = String(book.title || 'Untitled')
     const author = String(book.author || book.fileName || 'Unknown author')
-    return `<option value="${escapeHtml(book.id)}">${escapeHtml(title)} — ${escapeHtml(author)}</option>`
-  }).join('')}`
-  if (books.some((book) => book.id === selectedId)) select.value = selectedId
-  select.disabled = !books.length || state.writer.busy
+    return `<option value="book:${escapeHtml(book.id)}">${escapeHtml(title)} — ${escapeHtml(author)}</option>`
+  }).join('')
+  const draftOptions = drafts.map((draft) => `<option value="draft:${escapeHtml(draft.id)}">${escapeHtml(draft.title || 'Untitled draft')}</option>`).join('')
+  const options = [
+    bookOptions ? `<optgroup label="Books">${bookOptions}</optgroup>` : '',
+    draftOptions ? `<optgroup label="Unfinished drafts">${draftOptions}</optgroup>` : '',
+  ].join('')
+  select.innerHTML = `<option value="">${options ? 'Choose a book or draft...' : 'No books or drafts available'}</option>${options}`
+  const availableValues = [
+    ...books.map((book) => `book:${book.id}`),
+    ...drafts.map((draft) => `draft:${draft.id}`),
+  ]
+  if (availableValues.includes(selectedValue)) select.value = selectedValue
+  select.disabled = !availableValues.length || state.writer.busy
   button.disabled = state.writer.busy || !select.value
+  button.querySelector('span').textContent = select.value.startsWith('draft:') ? 'Resume draft' : 'Load into editor'
+  deleteButton.hidden = !select.value.startsWith('draft:')
+  deleteButton.disabled = state.writer.busy && select.value === `draft:${state.writer.draftId}`
 }
 
 const ignoredEpubTags = new Set(['HEAD', 'SCRIPT', 'STYLE', 'TITLE', 'NAV', 'NOSCRIPT', 'SVG'])
@@ -609,10 +668,29 @@ async function readEpubChapters(data) {
       if (chapter) chapters.push(chapter)
     }
 
-    return { chapters, metadata }
+    let cover = null
+    let coverError = null
+    try {
+      cover = await readEpubCover(book)
+    } catch (error) {
+      coverError = error
+    }
+    return { chapters, metadata, cover, coverError }
   } finally {
     book.destroy()
   }
+}
+
+async function readEpubCover(book) {
+  const coverUrl = await book.coverUrl()
+  if (!coverUrl) return null
+  const response = await fetch(coverUrl)
+  if (!response.ok) throw new Error(`The existing cover could not be read (${response.status}).`)
+  const blob = await response.blob()
+  if (!['image/png', 'image/jpeg'].includes(blob.type)) {
+    throw new Error(`The existing cover format "${blob.type || 'unknown'}" is not supported for editing.`)
+  }
+  return { data: new Uint8Array(await blob.arrayBuffer()), mediaType: blob.type }
 }
 
 function escapeHtml(value) {
@@ -630,14 +708,17 @@ function showToast(message) {
 function setActiveNavigation(view) {
   $('#library-nav').classList.toggle('sidebar-nav__item--active', view === 'library')
   $('#writer-nav').classList.toggle('sidebar-nav__item--active', view === 'writer')
+  $('#mobile-page-title').textContent = view === 'writer' ? 'AI Writer' : 'Library'
 }
 
-function showLibrary() {
+function showLibrary({ flushDraft = true } = {}) {
   if (state.active) closeReader()
-  flushWriterAutosave().catch((error) => {
-    reportWriterAutosaveError(error)
-    showToast('Could not save your unfinished draft. Keep the writing room open and try again.')
-  })
+  if (flushDraft) {
+    flushWriterAutosave().catch((error) => {
+      reportWriterAutosaveError(error)
+      showToast('Could not save your unfinished draft. Keep the writing room open and try again.')
+    })
+  }
   $('#writer-screen').hidden = true
   $('#library-screen').hidden = false
   setActiveNavigation('library')
@@ -658,6 +739,10 @@ function outlinePromptSignature() {
   return JSON.stringify([$('#book-topic').value.trim(), Number($('#page-count').value), $('#openrouter-model').value])
 }
 
+function isValidPageCount(pageCount) {
+  return Number.isSafeInteger(pageCount) && pageCount >= 1
+}
+
 function canContinueWriterStep(step) {
   if (step === 1) return Boolean($('#openrouter-key').value.trim() && $('#openrouter-model').value)
   if (step === 2) return Boolean(state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature())
@@ -669,11 +754,13 @@ function canContinueWriterStep(step) {
 function renderWriterStep() {
   const step = state.writer.wizardStep
   const busy = state.writer.busy
+  $('#writer-library-loader').hidden = step !== 1
   document.querySelectorAll('[data-wizard-panel]').forEach((panel) => {
     panel.hidden = Number(panel.dataset.wizardPanel) !== step
   })
   document.querySelectorAll('[data-wizard-indicator]').forEach((indicator) => {
     const indicatorStep = Number(indicator.dataset.wizardIndicator)
+    indicator.hidden = indicatorStep !== step
     indicator.classList.toggle('is-current', indicatorStep === step)
     indicator.classList.toggle('is-complete', indicatorStep < step)
     if (indicatorStep === step) indicator.setAttribute('aria-current', 'step')
@@ -709,12 +796,17 @@ function updateWriterControls() {
   $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !activeChapter?.content.trim()
   $('#save-draft').disabled = busy || !state.writer.chapters.some((chapter) => chapter.content.trim()) || !title
   $('#save-draft').querySelector('span').textContent = state.writer.savedBookId ? 'Update saved book' : 'Save to library'
+  $('#generate-cover').disabled = busy
   $('#manuscript-editor').readOnly = busy || state.writer.stage !== 'chapters'
   $('#chapter-prompt').readOnly = busy || state.writer.stage !== 'chapters'
   $('#chapter-workflow').hidden = state.writer.stage !== 'chapters'
-  $('#writer-library-book').disabled = busy || !state.books.length
+  $('#writer-library-book').disabled = busy || (!state.books.length && !state.drafts.length)
   $('#load-library-book').disabled = busy || !$('#writer-library-book').value
-  $('#writer-new-draft').disabled = busy
+  $('#load-library-book').querySelector('span').textContent = $('#writer-library-book').value.startsWith('draft:') ? 'Resume draft' : 'Load into editor'
+  const selectedWriterItem = $('#writer-library-book').value
+  const selectedDraft = selectedWriterItem.startsWith('draft:')
+  $('#delete-writer-draft').hidden = !selectedDraft
+  $('#delete-writer-draft').disabled = busy && selectedWriterItem === `draft:${state.writer.draftId}`
   renderWriterStep()
 }
 
@@ -795,7 +887,7 @@ function createWriterDraftRecord() {
   const title = $('#book-title').value.trim() || state.writer.suggestedTitle || topicTitle || 'Untitled draft'
 
   return {
-    id: state.writer.draftId || crypto.randomUUID(),
+    id: state.writer.draftId || createUuid(),
     title: title.slice(0, 100),
     updatedAt: Date.now(),
     chapterCount: Math.max(chapters.length, state.writer.outline.length, parseOutline($('#chapter-outline').value).length),
@@ -826,12 +918,13 @@ function createWriterDraftRecord() {
 
 async function persistWriterDraft() {
   if (!writerDraftHasContent()) return
-  if (!state.writer.draftId) state.writer.draftId = crypto.randomUUID()
+  if (!state.writer.draftId) state.writer.draftId = createUuid()
   const draft = createWriterDraftRecord()
   await storeRequest('drafts', 'readwrite', (store) => store.put(draft))
   const existingIndex = state.drafts.findIndex((item) => item.id === draft.id)
   if (existingIndex >= 0) state.drafts[existingIndex] = draft
   else state.drafts.push(draft)
+  renderWriterLibraryOptions()
   setWriterAutosaveStatus(`Draft saved locally at ${new Date(draft.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`)
   if (!$('#library-screen').hidden) renderLibrary()
 }
@@ -839,6 +932,18 @@ async function persistWriterDraft() {
 function reportWriterAutosaveError(error) {
   console.error('Could not autosave the unfinished book.', error)
   setWriterAutosaveStatus('Autosave failed. Keep this page open and try again.', 'error')
+}
+
+function trackWriterAutosave(task) {
+  writerAutosaveTasks.add(task)
+  task.then(
+    () => writerAutosaveTasks.delete(task),
+    (error) => {
+      writerAutosaveTasks.delete(task)
+      reportWriterAutosaveError(error)
+    },
+  )
+  return task
 }
 
 function scheduleWriterAutosave() {
@@ -850,14 +955,18 @@ function scheduleWriterAutosave() {
   setWriterAutosaveStatus('Saving draft...')
   writerAutosaveTimer = setTimeout(() => {
     writerAutosaveTimer = null
-    persistWriterDraft().catch(reportWriterAutosaveError)
+    trackWriterAutosave(persistWriterDraft())
   }, 650)
 }
 
 async function flushWriterAutosave() {
+  const hasPendingAutosave = writerAutosaveTimer !== null
   clearTimeout(writerAutosaveTimer)
   writerAutosaveTimer = null
-  if (writerDraftHasContent()) await persistWriterDraft()
+  await Promise.all([...writerAutosaveTasks])
+  if (hasPendingAutosave && writerDraftHasContent()) {
+    await trackWriterAutosave(persistWriterDraft())
+  }
 }
 
 function resumeWriterDraft(draft) {
@@ -894,7 +1003,7 @@ function resumeWriterDraft(draft) {
 
   const pageCount = Number(fields.pageCount)
   $('#book-topic').value = String(fields.topic || '')
-  $('#page-count').value = String(Number.isFinite(pageCount) && pageCount >= 1 && pageCount <= 30 ? pageCount : 8)
+  $('#page-count').value = String(isValidPageCount(pageCount) ? pageCount : 8)
   $('#chapter-outline').value = typeof fields.chapterOutline === 'string'
     ? fields.chapterOutline
     : state.writer.outline.map((title, index) => `${index + 1}. ${title}`).join('\n')
@@ -903,6 +1012,8 @@ function resumeWriterDraft(draft) {
   $('#book-author').value = String(fields.bookAuthor || '')
   $('#auto-fill-chapters').checked = Boolean(fields.autoFill)
   $('#cover-input').value = ''
+  $('#cover-title-overlay').hidden = true
+  $('#cover-placeholder').hidden = false
   $('#cover-preview').removeAttribute('src')
   $('#cover-preview').hidden = true
   $('#remove-cover').hidden = true
@@ -911,8 +1022,10 @@ function resumeWriterDraft(draft) {
     state.writer.coverUrl = URL.createObjectURL(new Blob([state.writer.cover.data], { type: state.writer.cover.mediaType }))
     $('#cover-preview').src = state.writer.coverUrl
     $('#cover-preview').hidden = false
+    $('#cover-placeholder').hidden = true
     $('#remove-cover').hidden = false
   }
+  updateCoverTitleOverlay()
 
   if (chapters.length) renderCurrentChapter()
   else {
@@ -929,38 +1042,6 @@ function resumeWriterDraft(draft) {
     : 'Draft resumed. Changes save automatically in this browser.')
 }
 
-async function startNewWriterDraft() {
-  if (state.writer.busy) return
-  try {
-    await flushWriterAutosave()
-  } catch (error) {
-    reportWriterAutosaveError(error)
-    showToast('Could not save the current draft. It is still open.')
-    return
-  }
-
-  if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
-  state.writer = createWriterState()
-  $('#book-topic').value = ''
-  $('#page-count').value = '8'
-  $('#chapter-outline').value = ''
-  $('#outline-revision-request').value = ''
-  $('#book-title').value = ''
-  $('#book-author').value = ''
-  $('#auto-fill-chapters').checked = false
-  $('#cover-input').value = ''
-  $('#cover-preview').removeAttribute('src')
-  $('#cover-preview').hidden = true
-  $('#remove-cover').hidden = true
-  $('#manuscript-title').textContent = 'Adjust your chapter text'
-  $('#chapter-position').textContent = 'Chapter 1 of 1'
-  $('#chapter-prompt').value = ''
-  $('#manuscript-editor').value = ''
-  showWriter()
-  setWriterStatus('Start with a book idea or load a book from your library.')
-  setWriterAutosaveStatus('Unfinished drafts save automatically in this browser.')
-}
-
 function setWriterBusy(busy, mode = '') {
   state.writer.busy = busy
   updateWriterControls()
@@ -970,6 +1051,7 @@ function setWriterBusy(busy, mode = '') {
   $('#revise-outline').querySelector('span').textContent = busy && mode === 'outline-revision' ? 'Revising suggestions...' : 'Revise suggestions with AI'
   const chapter = state.writer.chapters[state.writer.currentChapter]
   $('#generate-chapter').querySelector('span').textContent = busy && mode === 'chapter' ? 'Writing chapter...' : chapter?.content.trim() ? 'Regenerate chapter' : 'Generate chapter'
+  $('#generate-cover').querySelector('span').textContent = busy && mode === 'cover' ? 'Generating cover...' : 'Generate with AI'
   $('#writer-screen').classList.toggle('writer-screen--busy', busy)
 }
 
@@ -995,8 +1077,80 @@ function renderCurrentChapter() {
   scheduleWriterAutosave()
 }
 
-async function loadLibraryBookIntoWriter() {
-  const record = state.books.find((book) => book.id === $('#writer-library-book').value)
+async function loadSelectedWriterItem() {
+  const selection = $('#writer-library-book').value
+  const separatorIndex = selection.indexOf(':')
+  if (state.writer.busy) return
+  if (!selection || separatorIndex < 0) {
+    setWriterStatus('Choose a book or draft first.', 'error')
+    return
+  }
+
+  try {
+    await flushWriterAutosave()
+  } catch (error) {
+    reportWriterAutosaveError(error)
+    showToast('Could not save the current draft before loading another.')
+    return
+  }
+
+  const itemType = selection.slice(0, separatorIndex)
+  const itemId = selection.slice(separatorIndex + 1)
+  if (itemType === 'draft') {
+    const draft = state.drafts.find((item) => item.id === itemId)
+    if (!draft) {
+      renderWriterLibraryOptions()
+      setWriterStatus('That unfinished draft is no longer available.', 'error')
+      return
+    }
+    resumeWriterDraft(draft)
+    return
+  }
+  if (itemType === 'book') {
+    await loadLibraryBookIntoWriter(itemId)
+    return
+  }
+  setWriterStatus('Choose a valid book or draft.', 'error')
+}
+
+async function deleteSelectedWriterDraft() {
+  const selection = $('#writer-library-book').value
+  if (!selection.startsWith('draft:')) return
+
+  const draftId = selection.slice('draft:'.length)
+  const draft = state.drafts.find((item) => item.id === draftId)
+  if (!draft) {
+    renderWriterLibraryOptions()
+    setWriterStatus('That unfinished draft is no longer available.', 'error')
+    return
+  }
+  if (state.writer.busy && state.writer.draftId === draftId) return
+  if (!window.confirm(`Delete the unfinished draft “${draft.title || 'Untitled draft'}”?`)) return
+
+  if (state.writer.draftId === draftId) {
+    clearTimeout(writerAutosaveTimer)
+    writerAutosaveTimer = null
+  }
+  try {
+    await storeRequest('drafts', 'readwrite', (store) => store.delete(draftId))
+  } catch (error) {
+    console.error('Could not delete the unfinished draft.', error)
+    if (state.writer.draftId === draftId) scheduleWriterAutosave()
+    showToast('Could not delete that draft.')
+    return
+  }
+
+  state.drafts = state.drafts.filter((item) => item.id !== draftId)
+  if (state.writer.draftId === draftId) {
+    state.writer.draftId = null
+    setWriterAutosaveStatus('Draft deleted. Continued edits will create a new autosaved draft.')
+  }
+  renderWriterLibraryOptions()
+  showToast('Draft deleted.')
+}
+
+async function loadLibraryBookIntoWriter(recordId) {
+  const record = state.books.find((book) => book.id === recordId)
   if (!record) {
     setWriterStatus('Choose a book from your library first.', 'error')
     return
@@ -1005,7 +1159,7 @@ async function loadLibraryBookIntoWriter() {
   setWriterBusy(true, 'load-book')
   setWriterStatus(`Loading "${record.title || 'Untitled'}" into the chapter editor...`)
   try {
-    const { chapters, metadata } = await readEpubChapters(record.data)
+    const { chapters, metadata, cover, coverError } = await readEpubChapters(record.data)
     if (!chapters.length) throw new Error('No readable chapter text was found in that EPUB.')
 
     const title = normalizeEpubText(metadata.title) || record.title || 'Untitled'
@@ -1015,9 +1169,11 @@ async function loadLibraryBookIntoWriter() {
     state.writer.cover = null
     state.writer.coverUrl = ''
     $('#cover-input').value = ''
+    $('#cover-placeholder').hidden = false
     $('#cover-preview').removeAttribute('src')
     $('#cover-preview').hidden = true
     $('#remove-cover').hidden = true
+    $('#cover-title-overlay').hidden = true
     state.writer.loadedBookId = record.id
     state.writer.savedBookId = null
     state.writer.stage = 'chapters'
@@ -1029,14 +1185,24 @@ async function loadLibraryBookIntoWriter() {
     $('#book-title').value = title
     $('#book-author').value = author
     $('#book-topic').value = `Preserve the existing story, characters, setting, and voice of "${title}". Revise the selected chapter using its existing text as the source.`
-    $('#page-count').value = String(Math.max(1, Math.min(30, Math.ceil(wordCount / 200))))
+    $('#page-count').value = String(Math.max(1, Math.ceil(wordCount / 200)))
     $('#chapter-outline').value = chapters.map((chapter, index) => `${index + 1}. ${chapter.title}`).join('\n')
     $('#outline-revision-request').value = ''
     $('#auto-fill-chapters').checked = false
     state.writer.outlinePrompt = outlinePromptSignature()
     state.writer.wizardStep = 4
+    if (record.coverOriginal?.data && record.coverOriginal.mediaType) {
+      setWriterCover(record.coverOriginal.data, record.coverOriginal.mediaType, 'ai')
+    } else if (cover) {
+      setWriterCover(cover.data, cover.mediaType, 'existing')
+    }
     renderCurrentChapter()
-    setWriterStatus(`Loaded "${title}" into the editor. The original remains in your library; saving creates a separate edited copy.`)
+    if (coverError) {
+      console.error('Could not load the selected book cover into the AI editor.', coverError)
+      setWriterStatus(`Loaded "${title}" into the editor, but its existing cover could not be displayed.`)
+    } else {
+      setWriterStatus(`Loaded "${title}" into the editor. The original remains in your library; saving creates a separate edited copy.`)
+    }
   } catch (error) {
     console.error('Could not load the selected book into the AI editor.', error)
     setWriterStatus(error.message || 'Could not load that book into the editor.', 'error')
@@ -1051,20 +1217,133 @@ async function selectCover(file) {
     setWriterStatus('Choose a PNG or JPEG cover image.', 'error')
     return
   }
-  const previewUrl = URL.createObjectURL(file)
   try {
     const data = new Uint8Array(await file.arrayBuffer())
-    if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
-    state.writer.cover = { data, mediaType: file.type }
-    state.writer.coverUrl = previewUrl
-    $('#cover-preview').src = previewUrl
-    $('#cover-preview').hidden = false
-    $('#remove-cover').hidden = false
+    setWriterCover(data, file.type)
     setWriterStatus('Custom cover ready to include in the EPUB.')
-    scheduleWriterAutosave()
   } catch (error) {
-    URL.revokeObjectURL(previewUrl)
     setWriterStatus(error.message || 'The cover image could not be read.', 'error')
+  }
+}
+
+function setWriterCover(data, mediaType, source = 'upload') {
+  const coverData = data instanceof Uint8Array ? data : new Uint8Array(data)
+  const previewUrl = URL.createObjectURL(new Blob([coverData], { type: mediaType }))
+  if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
+  state.writer.cover = { data: coverData, mediaType, source }
+  state.writer.coverUrl = previewUrl
+  $('#cover-preview').src = previewUrl
+  $('#cover-preview').hidden = false
+  $('#cover-placeholder').hidden = true
+  $('#remove-cover').hidden = false
+  updateCoverTitleOverlay()
+  scheduleWriterAutosave()
+}
+
+function updateCoverTitleOverlay() {
+  const overlay = $('#cover-title-overlay')
+  const title = $('#book-title').value.trim()
+  const showTitle = state.writer.cover?.source === 'ai' && Boolean(title)
+  overlay.textContent = showTitle ? title : ''
+  overlay.hidden = !showTitle
+}
+
+async function createTitledCover(cover, title) {
+  if (cover?.source !== 'ai' || !title.trim()) return cover
+
+  const imageUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.mediaType }))
+  const image = new Image()
+  try {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve
+      image.onerror = () => reject(new Error('Could not prepare the AI cover for its title.'))
+      image.src = imageUrl
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Could not prepare the AI cover for its title.')
+    context.drawImage(image, 0, 0)
+
+    const titleWidth = canvas.width * 0.84
+    let fontSize = Math.max(18, Math.round(canvas.width * 0.075))
+    let lines = []
+    while (fontSize >= 14) {
+      context.font = `600 ${fontSize}px Georgia, serif`
+      lines = []
+      for (const word of title.trim().split(/\s+/)) {
+        const currentLine = lines[lines.length - 1]
+        const candidate = currentLine ? `${currentLine} ${word}` : word
+        if (currentLine && context.measureText(candidate).width > titleWidth) lines.push(word)
+        else if (currentLine) lines[lines.length - 1] = candidate
+        else lines.push(word)
+      }
+      if (lines.length * fontSize * 1.15 <= canvas.height * 0.34) break
+      fontSize -= 2
+    }
+
+    const gradient = context.createLinearGradient(0, canvas.height * 0.55, 0, canvas.height)
+    gradient.addColorStop(0, 'rgba(10, 16, 13, 0)')
+    gradient.addColorStop(0.35, 'rgba(10, 16, 13, 0.32)')
+    gradient.addColorStop(1, 'rgba(10, 16, 13, 0.82)')
+    context.fillStyle = gradient
+    context.fillRect(0, canvas.height * 0.55, canvas.width, canvas.height * 0.45)
+    context.font = `600 ${fontSize}px Georgia, serif`
+    context.textAlign = 'center'
+    context.textBaseline = 'alphabetic'
+    context.fillStyle = '#fffdf7'
+    context.shadowColor = 'rgba(0, 0, 0, 0.45)'
+    context.shadowBlur = fontSize * 0.12
+    const lineHeight = fontSize * 1.15
+    const firstLineY = canvas.height * 0.92 - (lines.length - 1) * lineHeight
+    lines.forEach((line, index) => {
+      context.fillText(line, canvas.width / 2, firstLineY + index * lineHeight, titleWidth)
+    })
+
+    const output = await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Could not export the titled AI cover.'))
+      }, 'image/png')
+    })
+    return { data: new Uint8Array(await output.arrayBuffer()), mediaType: 'image/png' }
+  } finally {
+    URL.revokeObjectURL(imageUrl)
+  }
+}
+
+async function generateWriterCover() {
+  const apiKey = $('#openrouter-key').value.trim()
+  const title = $('#book-title').value.trim()
+  const author = $('#book-author').value.trim()
+  const topic = $('#book-topic').value.trim()
+  if (!apiKey) {
+    setWriterStatus('Add your OpenRouter API key to generate a cover.', 'error')
+    $('#openrouter-key').focus()
+    return
+  }
+  if (!title) {
+    setWriterStatus('Add a book title before generating its cover.', 'error')
+    $('#book-title').focus()
+    return
+  }
+
+  const chapterTitles = state.writer.chapters.map((chapter) => chapter.title).filter(Boolean).join('; ')
+  const prompt = `Create an original, polished photographic front-cover image for a book titled "${title}"${author ? ` by ${author}` : ''}. Use this book idea and mood as visual inspiration: ${topic || chapterTitles || title}. ${chapterTitles ? `Chapter themes: ${chapterTitles}.` : ''} Make it a striking portrait composition with a clear focal subject that remains legible as a small thumbnail. No text, lettering, typography, logos, borders, or book mockups.`
+
+  setWriterBusy(true, 'cover')
+  setWriterStatus('Generating a cover with FLUX 3 Image Klein...')
+  try {
+    const cover = await generateOpenRouterImage({ apiKey, prompt })
+    setWriterCover(cover.data, cover.mediaType, 'ai')
+    setWriterStatus('AI cover generated. Save the book to include it in your EPUB.')
+  } catch (error) {
+    console.error('Could not generate an AI cover.', error)
+    setWriterStatus(error instanceof Error ? error.message : 'Could not generate an AI cover.', 'error')
+  } finally {
+    setWriterBusy(false)
   }
 }
 
@@ -1117,8 +1396,8 @@ async function requestDraft(kind) {
     $('#openrouter-key').focus()
     return
   }
-  if (!model || !topic || pages < 1 || pages > 30) {
-    setWriterStatus('Enter a book idea and a length from 1 to 30 pages.', 'error')
+  if (!model || !topic || !isValidPageCount(pages)) {
+    setWriterStatus('Enter a book idea and a positive whole-number page count.', 'error')
     return
   }
   state.writer.stage = 'outline'
@@ -1172,8 +1451,8 @@ async function requestChapterDrafts() {
     $('#openrouter-key').focus()
     return
   }
-  if (!model || !topic || pages < 1 || pages > 30) {
-    setWriterStatus('Enter a book idea and a length from 1 to 30 pages.', 'error')
+  if (!model || !topic || !isValidPageCount(pages)) {
+    setWriterStatus('Enter a book idea and a positive whole-number page count.', 'error')
     return
   }
   if (!chapterIndexes.length || !state.writer.chapters[startIndex]) return
@@ -1236,7 +1515,7 @@ async function reviseOutline() {
     $('#outline-revision-request').focus()
     return
   }
-  if (!apiKey || !model || !topic || pages < 1 || pages > 30) {
+  if (!apiKey || !model || !topic || !isValidPageCount(pages)) {
     setWriterStatus('Check your AI connection and book prompt before revising the suggestions.', 'error')
     return
   }
@@ -1274,6 +1553,7 @@ async function reviseOutline() {
 async function saveDraft() {
   clearTimeout(writerAutosaveTimer)
   writerAutosaveTimer = null
+  await Promise.all([...writerAutosaveTasks].map((task) => task.catch(() => {})))
   const title = $('#book-title').value.trim()
   const author = $('#book-author').value.trim() || 'Leaf reader'
   const manuscript = `# ${title}\n\n${state.writer.chapters
@@ -1282,11 +1562,23 @@ async function saveDraft() {
     .join('\n\n')}`
   if (!title || !manuscript) return
 
-  const id = state.writer.savedBookId || crypto.randomUUID()
+  const id = state.writer.savedBookId || createUuid()
   const existing = state.books.find((book) => book.id === id)
-  const data = createEpub({ title, author, manuscript, cover: state.writer.cover })
+  const cover = await createTitledCover(state.writer.cover, title)
+  const data = createEpub({ title, author, manuscript, cover })
   const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'leaf-book'}.epub`
-  const record = { id, title, author, fileName, data, addedAt: existing?.addedAt || Date.now(), source: 'ai' }
+  const record = {
+    id,
+    title,
+    author,
+    fileName,
+    data,
+    addedAt: existing?.addedAt || Date.now(),
+    source: 'ai',
+    ...(state.writer.cover?.source === 'ai'
+      ? { coverOriginal: { data: state.writer.cover.data, mediaType: state.writer.cover.mediaType } }
+      : {}),
+  }
   await storeRequest('books', 'readwrite', (store) => store.put(record))
   if (existing) {
     await storeRequest('progress', 'readwrite', (store) => store.delete(id))
@@ -1296,6 +1588,7 @@ async function saveDraft() {
     state.books.push(record)
   }
   state.writer.savedBookId = id
+  state.writer.wizardStep = 1
   let autosavedDraftRemoved = true
   if (state.writer.draftId) {
     const draftId = state.writer.draftId
@@ -1333,7 +1626,7 @@ async function importFile(file) {
     await book.ready
     const metadata = await book.loaded.metadata
     const record = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       title: metadata.title || file.name.replace(/\.epub$/i, ''),
       author: metadata.creator || '',
       fileName: file.name,
@@ -1346,10 +1639,115 @@ async function importFile(file) {
     renderLibrary()
     openBook(record.id)
   } catch (error) {
-    showToast('That EPUB could not be opened. Try another file.')
+    const reason = error instanceof Error ? error.message : String(error)
+    showToast(reason ? `Could not import EPUB: ${reason}` : 'That EPUB could not be opened. Try another file.')
     console.error(error)
   } finally {
     input.value = ''
+  }
+}
+
+function turnActivePage(direction) {
+  const rendition = state.active?.rendition
+  if (!rendition) return
+  const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
+  navigation.catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+}
+
+function cancelBookPageCount(active) {
+  active.pageCountToken += 1
+  clearTimeout(active.pageCountTimer)
+  active.pageCountObserver?.disconnect()
+  if (active.pageCountResizeHandler) window.removeEventListener('resize', active.pageCountResizeHandler)
+}
+
+function requestBookPageCount() {
+  const active = state.active
+  if (!active || $('#reader-screen').hidden) return
+  active.pageCountToken += 1
+  const token = active.pageCountToken
+  clearTimeout(active.pageCountTimer)
+  active.pageCountOffsets = null
+  active.pageCountTotal = null
+  $('#page-count-label').textContent = '— / —'
+  $('#page-count-label').setAttribute('aria-label', 'Counting pages in this book')
+  $('#page-count-label').title = 'Counting pages in this book'
+  active.pageCountTimer = setTimeout(() => {
+    active.pageCountQueue = active.pageCountQueue.then(() => measureBookPageCount(active, token)).catch((error) => {
+      if (state.active === active && active.pageCountToken === token) {
+        $('#page-count-label').textContent = '— / —'
+        $('#page-count-label').setAttribute('aria-label', 'Book page count unavailable')
+        $('#page-count-label').title = 'Book page count unavailable'
+      }
+      console.error('Could not count pages in the EPUB.', error)
+    })
+  }, 300)
+}
+
+async function measureBookPageCount(active, token) {
+  if (state.active !== active || active.pageCountToken !== token) return
+  const readerFrame = $('#epub-frame')
+  const width = readerFrame.clientWidth
+  const height = readerFrame.clientHeight
+  if (width < 1 || height < 1) return
+
+  const container = document.createElement('div')
+  container.setAttribute('aria-hidden', 'true')
+  Object.assign(container.style, {
+    position: 'fixed',
+    left: '-100000px',
+    top: '0',
+    width: `${width}px`,
+    height: `${height}px`,
+    overflow: 'hidden',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  })
+  document.body.append(container)
+
+  let measurementBook
+  try {
+    measurementBook = ePub(active.record.data)
+    await measurementBook.ready
+    measurementBook.spine.hooks.content.register((document) => {
+      document.querySelectorAll('script').forEach((script) => script.remove())
+    })
+    const measurementRendition = measurementBook.renderTo(container, {
+      width,
+      height,
+      spread: 'none',
+      flow: 'paginated',
+      allowScriptedContent: false,
+    })
+    applyRenditionReaderTheme(measurementRendition, state.readerPreferences)
+    const sections = measurementBook.spine.spineItems.filter((section) => section.href)
+    if (!sections.length) throw new Error('The EPUB contains no readable sections.')
+
+    const pageOffsets = new Array(measurementBook.spine.spineItems.length)
+    let totalPages = 0
+    for (const section of sections) {
+      if (state.active !== active || active.pageCountToken !== token) return
+      await measurementRendition.display(section.index)
+      const location = await measurementRendition.currentLocation()
+      const pages = Number(location?.start?.displayed?.total)
+      if (location?.start?.index !== section.index || !Number.isInteger(pages) || pages < 1) {
+        throw new Error(`Could not determine the page count for EPUB section ${section.href}.`)
+      }
+      pageOffsets[section.index] = totalPages
+      totalPages += pages
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    if (state.active !== active || active.pageCountToken !== token) return
+    active.pageCountOffsets = pageOffsets
+    active.pageCountTotal = totalPages
+    updateReadingPosition(await active.rendition.currentLocation())
+  } finally {
+    try {
+      measurementBook?.destroy()
+    } finally {
+      container.remove()
+    }
   }
 }
 
@@ -1357,6 +1755,7 @@ async function openBook(id) {
   const record = state.books.find((book) => book.id === id)
   if (!record) return
   if (state.active) {
+    cancelBookPageCount(state.active)
     state.active.rendition.destroy()
     state.active.book.destroy()
   }
@@ -1372,9 +1771,35 @@ async function openBook(id) {
     flow: 'paginated',
     allowScriptedContent: false,
   })
-  state.active = { book, rendition, record }
+  state.active = {
+    book,
+    rendition,
+    record,
+    pageCountOffsets: null,
+    pageCountTotal: null,
+    pageCountToken: 0,
+    pageCountTimer: null,
+    pageCountQueue: Promise.resolve(),
+    pageCountObserver: null,
+    pageCountResizeHandler: null,
+  }
   const pageDocuments = new WeakSet()
   const readerFrame = $('#epub-frame')
+  const turnPage = (direction) => {
+    const before = rendition.currentLocation()
+    console.log('[Leaf page-turn] Requesting navigation.', {
+      direction,
+      before: before?.start?.cfi,
+    })
+    const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
+    navigation.then(() => {
+      const after = rendition.currentLocation()
+      console.log('[Leaf page-turn] Navigation completed.', {
+        direction,
+        after: after?.start?.cfi,
+      })
+    }).catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+  }
   rendition.on('rendered', (_section, view) => {
     const pageDocument = view.contents?.document
     const pageFrame = view.iframe
@@ -1390,7 +1815,61 @@ async function openBook(id) {
       iframeWidth: pageFrame.clientWidth,
       contentWidth: pageDocument.defaultView?.innerWidth,
     })
+    let touchStart = null
+    let suppressedTouchClick = null
+    pageDocument.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 1) {
+        touchStart = null
+        return
+      }
+      const touch = event.touches[0]
+      touchStart = { x: touch.clientX, y: touch.clientY }
+    }, { capture: true, passive: true })
+    pageDocument.addEventListener('touchmove', (event) => {
+      if (!touchStart) return
+      if (event.touches.length !== 1) {
+        touchStart = null
+        return
+      }
+      const touch = event.touches[0]
+      const deltaX = touch.clientX - touchStart.x
+      const deltaY = touch.clientY - touchStart.y
+      if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY) && event.cancelable) {
+        event.preventDefault()
+      }
+    }, { capture: true, passive: false })
+    pageDocument.addEventListener('touchend', (event) => {
+      if (!touchStart) return
+      const start = touchStart
+      touchStart = null
+      const touch = event.changedTouches[0]
+      if (!touch) return
+      const deltaX = touch.clientX - start.x
+      const deltaY = touch.clientY - start.y
+      const swipeThreshold = Math.max(32, readerFrame.clientWidth * 0.08)
+      let direction
+      if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
+        direction = deltaX < 0 ? 'next' : 'prev'
+      } else if (Math.abs(deltaX) <= 12 && Math.abs(deltaY) <= 12) {
+        const readerBounds = readerFrame.getBoundingClientRect()
+        const iframeBounds = pageFrame.getBoundingClientRect()
+        const coordinateScale = pageFrame.clientWidth ? iframeBounds.width / pageFrame.clientWidth : 1
+        const tapX = iframeBounds.left + touch.clientX * coordinateScale - readerBounds.left
+        direction = tapX < readerBounds.width / 2 ? 'prev' : 'next'
+      }
+      if (!direction) return
+      suppressedTouchClick = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+      turnPage(direction)
+    }, { capture: true, passive: true })
+    pageDocument.addEventListener('touchcancel', () => {
+      touchStart = null
+    }, { capture: true, passive: true })
     pageDocument.addEventListener('click', (event) => {
+      if (suppressedTouchClick) {
+        const { x, y, expiresAt } = suppressedTouchClick
+        suppressedTouchClick = null
+        if (Date.now() < expiresAt && Math.abs(event.clientX - x) < 32 && Math.abs(event.clientY - y) < 32) return
+      }
       const readerBounds = readerFrame.getBoundingClientRect()
       const iframeBounds = pageFrame.getBoundingClientRect()
       const coordinateScale = pageFrame.clientWidth ? iframeBounds.width / pageFrame.clientWidth : 1
@@ -1410,22 +1889,11 @@ async function openBook(id) {
       }
 
       const direction = clickX < pageWidth / 2 ? 'prev' : 'next'
-      const before = rendition.currentLocation()
-      console.log('[Leaf page-turn] Requesting navigation.', {
-        direction,
-        before: before?.start?.cfi,
-      })
-      const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
-      navigation.then(() => {
-        const after = rendition.currentLocation()
-        console.log('[Leaf page-turn] Navigation completed.', {
-          direction,
-          after: after?.start?.cfi,
-        })
-      }).catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+      turnPage(direction)
     })
   })
   $('#reader-title').textContent = record.title
+  $('#reader-author').textContent = record.author || ''
   app.querySelector('.app-shell').classList.add('app-shell--reading')
   $('#library-screen').hidden = true
   $('#writer-screen').hidden = true
@@ -1447,9 +1915,20 @@ async function openBook(id) {
   const navigation = await book.loaded.navigation
   renderToc(navigation.toc || [])
   icons()
+  if (typeof ResizeObserver === 'function') {
+    const pageCountObserver = new ResizeObserver(requestBookPageCount)
+    pageCountObserver.observe(readerFrame)
+    state.active.pageCountObserver = pageCountObserver
+  } else {
+    state.active.pageCountResizeHandler = requestBookPageCount
+    window.addEventListener('resize', requestBookPageCount)
+  }
+  requestBookPageCount()
   book.locations.generate(1000).then(() => {
     if (state.active?.record.id === id) updateReadingPosition(rendition.currentLocation())
-  }).catch(() => {})
+  }).catch((error) => {
+    console.error('Could not generate EPUB reading locations.', error)
+  })
 }
 
 function renderToc(items, depth = 0) {
@@ -1470,7 +1949,7 @@ function renderBookmarks() {
   $('#bookmark-list').innerHTML = records.map((bookmark) => `
     <div class="bookmark-item">
       <button class="chapter-link bookmark-link" type="button" data-bookmark-cfi="${escapeHtml(bookmark.cfi)}">
-        <span>${escapeHtml(bookmark.chapter || 'Reading')}</span><small>${bookmark.percentage}%</small>
+        <span>${escapeHtml(bookmark.chapter || 'Reading')}</span><small>${Number.isFinite(bookmark.percentage) ? `${bookmark.percentage}%` : '—%'}</small>
       </button>
       <button class="icon-button bookmark-remove" type="button" data-bookmark-remove="${escapeHtml(bookmark.id)}" aria-label="Remove bookmark" title="Remove bookmark"><i data-lucide="x"></i></button>
     </div>`).join('') || '<p class="toc-empty">No bookmarks in this book yet.</p>'
@@ -1481,9 +1960,9 @@ function renderBookmarks() {
 function syncBookmarkButton(cfi) {
   const isBookmarked = Boolean(state.active && state.bookmarks.some((bookmark) => bookmark.bookId === state.active.record.id && bookmark.cfi === cfi))
   const button = $('#bookmark-current')
-  button.textContent = isBookmarked ? 'Remove bookmark from this page' : 'Bookmark this page'
-  button.title = button.textContent
-  button.setAttribute('aria-label', button.textContent)
+  const label = isBookmarked ? 'Remove bookmark from this page' : 'Bookmark this page'
+  button.title = label
+  button.setAttribute('aria-label', label)
   button.setAttribute('aria-pressed', String(isBookmarked))
 }
 
@@ -1498,12 +1977,13 @@ async function toggleBookmark() {
     state.bookmarks = state.bookmarks.filter((bookmark) => bookmark.id !== existing.id)
     showToast('Bookmark removed.')
   } else {
+    const percentage = Number.parseFloat($('#progress-label').textContent)
     const bookmark = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       bookId: state.active.record.id,
       cfi,
       chapter: $('#chapter-label').textContent,
-      percentage: Number($('#progress-label').textContent.replace('%', '')) || 0,
+      percentage: Number.isFinite(percentage) ? percentage : null,
       createdAt: Date.now(),
     }
     await storeRequest('bookmarks', 'readwrite', (store) => store.put(bookmark))
@@ -1516,16 +1996,40 @@ async function toggleBookmark() {
 function updateReadingPosition(location) {
   if (!state.active || !location?.start) return
   const { book, record } = state.active
-  const progressCfi = location.end?.cfi || location.start.cfi
-  const fraction = book.locations.length()
-    ? book.locations.percentageFromCfi(progressCfi)
-    : location.end?.percentage ?? location.start.percentage
-  const percentage = Math.max(0, Math.min(100, Math.round((fraction || 0) * 100)))
-  $('#progress-fill').style.width = `${percentage}%`
-  $('#progress-label').textContent = `${percentage}%`
+  const displayed = location.start.displayed
+  const pageCount = $('#page-count-label')
+  const page = Number(displayed?.page)
+  const pageOffset = state.active.pageCountOffsets?.[location.start.index]
+  const totalPages = state.active.pageCountTotal
+  let bookPage = null
+  if (Number.isInteger(page) && page > 0 && Number.isInteger(pageOffset) && Number.isInteger(totalPages) && totalPages > 0) {
+    bookPage = pageOffset + page
+    pageCount.textContent = `${bookPage} / ${totalPages}`
+    pageCount.setAttribute('aria-label', `Book page ${bookPage} of ${totalPages}`)
+    pageCount.title = `Book page ${bookPage} of ${totalPages}`
+  } else {
+    pageCount.textContent = '— / —'
+    if (totalPages !== null) {
+      pageCount.setAttribute('aria-label', 'Book page count unavailable')
+      pageCount.title = 'Book page count unavailable'
+    }
+  }
+  const fraction = bookPage !== null
+    ? bookPage / totalPages
+    : book.locations.length()
+      ? book.locations.percentageFromCfi(location.start.cfi)
+      : location.start.percentage
+  const precisionBase = Number.isInteger(totalPages) && totalPages > 0 ? totalPages : book.locations.length()
+  const percentageDigits = Math.max(0, Math.ceil(Math.log10(precisionBase / 100)))
+  const percentage = Number.isFinite(fraction)
+    ? Number((Math.max(0, Math.min(1, fraction)) * 100).toFixed(percentageDigits))
+    : null
+  $('#progress-fill').style.width = `${percentage ?? 0}%`
+  $('#progress-label').textContent = percentage === null ? '—%' : `${percentage.toFixed(percentageDigits)}%`
   $('#chapter-label').textContent = location.start.href?.split('#')[0]?.split('/').pop()?.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') || 'Reading'
   syncBookmarkButton(location.start.cfi)
   clearTimeout(saveTimer)
+  if (percentage === null) return
   saveTimer = setTimeout(async () => {
     const progress = { id: record.id, cfi: location.start.cfi, percentage, lastOpenedAt: Date.now() }
     try {
@@ -1549,6 +2053,7 @@ function setReaderPreference(name, value) {
   state.readerPreferences[name] = value
   persistReaderPreferences()
   applyReaderTheme()
+  if (['fontSize', 'font', 'lineHeight'].includes(name)) requestBookPageCount()
 }
 
 function setReaderSettingsOpen(open) {
@@ -1563,18 +2068,30 @@ function applyReaderTheme() {
   $('#reader-font-size-value').textContent = `${preferences.fontSize}%`
   $('#reader-font-family').value = preferences.font
   $('#reader-line-height').value = String(preferences.lineHeight)
+  const preview = $('#reader-font-preview')
+  const previewText = $('#reader-font-preview-text')
+  preview.style.setProperty('--reader-preview-background', colors.background)
+  preview.style.setProperty('--reader-preview-color', colors.color)
+  previewText.style.fontFamily = readerFonts[preferences.font]
+  previewText.style.fontSize = `${preferences.fontSize}%`
+  previewText.style.lineHeight = String(preferences.lineHeight)
   document.querySelectorAll('[data-reader-theme]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.readerTheme === preferences.theme))
   })
   const screen = $('#reader-screen')
   screen.dataset.theme = preferences.theme
-  screen.style.setProperty('--reader-app-background', colors.screen)
-  screen.style.setProperty('--reader-toolbar-background', colors.toolbar)
+  screen.style.setProperty('--reader-app-background', colors.background)
+  screen.style.setProperty('--reader-toolbar-background', colors.background)
   screen.style.setProperty('--reader-paper-background', colors.background)
-  screen.style.setProperty('--reader-frame-border', colors.border)
+  screen.style.setProperty('--reader-frame-border', colors.background)
   screen.dataset.themeMode = colors.dark ? 'dark' : 'light'
   if (!state.active) return
-  state.active.rendition.themes.default({
+  applyRenditionReaderTheme(state.active.rendition, preferences)
+}
+
+function applyRenditionReaderTheme(rendition, preferences) {
+  const colors = readerThemes[preferences.theme]
+  rendition.themes.default({
     body: {
       'font-family': `${readerFonts[preferences.font]} !important`,
       'font-size': `${preferences.fontSize}% !important`,
@@ -1585,13 +2102,15 @@ function applyReaderTheme() {
       'user-select': 'none !important',
       '-webkit-user-select': 'none !important',
       '-webkit-touch-callout': 'none !important',
+      'touch-action': 'pan-y !important',
     },
   })
-  state.active.rendition.themes.fontSize(`${preferences.fontSize}%`)
+  rendition.themes.fontSize(`${preferences.fontSize}%`)
 }
 
 function closeReader() {
   if (state.active) {
+    cancelBookPageCount(state.active)
     state.active.rendition.destroy()
     state.active.book.destroy()
     state.active = null
@@ -1605,14 +2124,9 @@ function closeReader() {
 
 $('#library-nav').addEventListener('click', showLibrary)
 $('#writer-nav').addEventListener('click', showWriter)
-$('#writer-new-draft').addEventListener('click', () => {
-  startNewWriterDraft().catch((error) => {
-    reportWriterAutosaveError(error)
-    showToast('Could not start a new draft.')
-  })
-})
 $('#writer-library-book').addEventListener('change', updateWriterControls)
-$('#load-library-book').addEventListener('click', () => loadLibraryBookIntoWriter())
+$('#load-library-book').addEventListener('click', () => loadSelectedWriterItem())
+$('#delete-writer-draft').addEventListener('click', () => deleteSelectedWriterDraft())
 $('#wizard-back').addEventListener('click', returnToPreviousWriterStep)
 $('#wizard-next').addEventListener('click', continueWriterWorkflow)
 $('#generate-button').addEventListener('click', () => requestDraft('outline'))
@@ -1621,6 +2135,7 @@ $('#generate-chapter').addEventListener('click', () => requestDraft('chapter'))
 $('#save-draft').addEventListener('click', async () => {
   try {
     await saveDraft()
+    showLibrary({ flushDraft: false })
   } catch (error) {
     setWriterStatus(error.message || 'The book could not be saved.', 'error')
     scheduleWriterAutosave()
@@ -1718,16 +2233,20 @@ $('#chapter-next').addEventListener('click', () => {
 })
 $('#book-title').addEventListener('input', () => {
   updateWriterControls()
+  updateCoverTitleOverlay()
   scheduleWriterAutosave()
 })
 $('#book-author').addEventListener('input', scheduleWriterAutosave)
 $('#auto-fill-chapters').addEventListener('change', scheduleWriterAutosave)
 $('#cover-input').addEventListener('change', (event) => selectCover(event.target.files[0]))
+$('#generate-cover').addEventListener('click', generateWriterCover)
 $('#remove-cover').addEventListener('click', () => {
   if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
   state.writer.cover = null
   state.writer.coverUrl = ''
   $('#cover-input').value = ''
+  $('#cover-title-overlay').hidden = true
+  $('#cover-placeholder').hidden = false
   $('#cover-preview').removeAttribute('src')
   $('#cover-preview').hidden = true
   $('#remove-cover').hidden = true
@@ -1741,6 +2260,23 @@ $('#search-input').addEventListener('input', (event) => {
   renderLibrary()
 })
 $('#book-grid').addEventListener('click', async (event) => {
+  const download = event.target.closest('[data-download]')
+  if (download) {
+    const book = state.books.find((item) => item.id === download.dataset.download)
+    if (!book) {
+      showToast('That book is no longer in your library.')
+      return
+    }
+    try {
+      downloadBook(book)
+      showToast('Your EPUB download has started.')
+    } catch (error) {
+      console.error('Could not download the book from your library.', error)
+      showToast('Could not download that book.')
+    }
+    return
+  }
+
   const remove = event.target.closest('[data-remove]')
   if (remove) {
     const id = remove.dataset.remove
@@ -1762,59 +2298,11 @@ $('#book-grid').addEventListener('click', async (event) => {
   const open = event.target.closest('[data-open]')
   if (open) openBook(open.dataset.open)
 })
-$('#writer-drafts').addEventListener('click', async (event) => {
-  const remove = event.target.closest('[data-delete-draft]')
-  if (remove) {
-    const id = remove.dataset.deleteDraft
-    const draft = state.drafts.find((item) => item.id === id)
-    if (!draft || !window.confirm(`Delete unfinished draft "${draft.title || 'Untitled draft'}"?`)) return
-    if (state.writer.busy && state.writer.draftId === id) {
-      showToast('Wait for the current chapter generation to finish before deleting this draft.')
-      return
-    }
-    if (state.writer.draftId === id) {
-      clearTimeout(writerAutosaveTimer)
-      writerAutosaveTimer = null
-    }
-    try {
-      await storeRequest('drafts', 'readwrite', (store) => store.delete(id))
-    } catch (error) {
-      console.error('Could not delete the unfinished draft.', error)
-      if (state.writer.draftId === id) scheduleWriterAutosave()
-      showToast('Could not delete this draft.')
-      return
-    }
-    state.drafts = state.drafts.filter((item) => item.id !== id)
-    if (state.writer.draftId === id) {
-      state.writer.draftId = null
-      setWriterAutosaveStatus('Draft deleted. Continued edits will create a new autosaved draft.')
-    }
-    renderLibrary()
-    showToast('Draft deleted.')
-    return
-  }
-
-  const resume = event.target.closest('[data-resume-draft]')
-  if (!resume) return
-  const id = resume.dataset.resumeDraft
-  if (state.writer.busy) {
-    showToast('Wait for the current chapter generation to finish before resuming another draft.')
-    return
-  }
-  try {
-    await flushWriterAutosave()
-    const draft = state.drafts.find((item) => item.id === id)
-    if (draft) resumeWriterDraft(draft)
-  } catch (error) {
-    reportWriterAutosaveError(error)
-    showToast('Could not save the current draft before resuming another.')
-  }
-})
-$('#continue-section').addEventListener('click', (event) => {
-  const button = event.target.closest('[data-open]')
-  if (button) openBook(button.dataset.open)
-})
 $('#back-button').addEventListener('click', closeReader)
+$('#reader-prev-page').addEventListener('click', () => turnActivePage('prev'))
+$('#reader-next-page').addEventListener('click', () => turnActivePage('next'))
+$('#reader-prev-zone').addEventListener('click', () => turnActivePage('prev'))
+$('#reader-next-zone').addEventListener('click', () => turnActivePage('next'))
 $('#toc-button').addEventListener('click', () => {
   $('#toc-panel').hidden = !$('#toc-panel').hidden
   $('#bookmark-panel').hidden = true
@@ -1855,6 +2343,7 @@ $('#reset-reader-settings').addEventListener('click', () => {
   state.readerPreferences = { ...readerPreferenceDefaults }
   persistReaderPreferences()
   applyReaderTheme()
+  requestBookPageCount()
 })
 $('#reader-font-size').addEventListener('input', (event) => setReaderPreference('fontSize', Number(event.target.value)))
 $('#reader-font-family').addEventListener('change', (event) => setReaderPreference('font', event.target.value))

@@ -68,3 +68,48 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
   if (!manuscript.trim()) throw new Error('The selected model returned an empty draft.')
   return manuscript.trim()
 }
+
+export async function generateOpenRouterImage({ apiKey, prompt }) {
+  const response = await fetch('https://openrouter.ai/api/v1/images', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': window.location.origin,
+      'X-OpenRouter-Title': 'Leaf',
+    },
+    body: JSON.stringify({
+      model: 'black-forest-labs/flux-3-image-klein',
+      prompt,
+      resolution: '1K',
+      aspect_ratio: '2:3',
+      n: 1,
+    }),
+  })
+
+  const result = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(result?.error?.message || `OpenRouter returned ${response.status}.`)
+  }
+
+  const image = result?.data?.[0]
+  if (typeof image?.b64_json !== 'string' || !image.b64_json) {
+    throw new Error('OpenRouter returned no cover image.')
+  }
+  if (!['image/png', 'image/jpeg'].includes(image.media_type)) {
+    throw new Error('OpenRouter returned an unsupported cover image format.')
+  }
+
+  let binary
+  try {
+    binary = atob(image.b64_json)
+  } catch {
+    throw new Error('OpenRouter returned invalid image data.')
+  }
+  const data = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    data[index] = binary.charCodeAt(index)
+  }
+
+  return { data, mediaType: image.media_type }
+}

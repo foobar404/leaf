@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate'
+import { createUuid } from './id.js'
 
 function escapeXml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -55,7 +56,7 @@ export function createEpub({ title, author, manuscript, cover = null }) {
   const coverMediaType = cover?.mediaType === 'image/png' || cover?.mediaType === 'image/jpeg' ? cover.mediaType : null
   const coverFileName = coverMediaType === 'image/png' ? 'cover.png' : 'cover.jpg'
   const coverBytes = coverMediaType && cover?.data ? (cover.data instanceof Uint8Array ? cover.data : new Uint8Array(cover.data)) : null
-  const identifier = `urn:uuid:${crypto.randomUUID()}`
+  const identifier = `urn:uuid:${createUuid()}`
   const chapterFiles = chapters.map((chapter, index) => {
     const fileName = `chapter-${String(index + 1).padStart(2, '0')}.xhtml`
     const body = chapter.blocks.map((block) => `<${block.type}>${escapeXml(block.text)}</${block.type}>`).join('\n')
