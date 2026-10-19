@@ -156,6 +156,7 @@ const state = {
 }
 let saveTimer
 let writerAutosaveTimer = null
+let readerUiTimer = null
 const writerAutosaveTasks = new Set()
 
 app.innerHTML = `
@@ -214,6 +215,7 @@ app.innerHTML = `
               <button class="icon-button" type="button" id="delete-writer-draft" aria-label="Delete selected draft" title="Delete selected draft" hidden><i data-lucide="trash-2"></i></button>
             </div>
           </section>
+          <p class="writer-autosave-status" id="writer-autosave-status" role="status" aria-live="polite">Unfinished drafts save automatically in this browser.</p>
           <div class="writer-wizard">
             <ol class="writer-progress" aria-label="AI writing walkthrough">
               <li data-wizard-indicator="1"><span>01</span><span>AI fields</span></li>
@@ -461,7 +463,7 @@ const bookCoverLoads = new Set()
 
 function coverMarkup(book, index) {
   const color = coverColors[index % coverColors.length]
-  return `<span class="book-cover" style="--cover-color:${color}" aria-hidden="true"><span class="book-cover__title">${escapeHtml(book.title || 'Untitled')}</span><span class="book-cover__author">${escapeHtml(book.author || 'Unknown author')}</span><img class="book-cover__image" data-book-cover="${escapeHtml(book.id)}" alt="" hidden></span>`
+  return `<span class="book-cover" style="--cover-color:${color}" aria-hidden="true"><img class="book-cover__image" data-book-cover="${escapeHtml(book.id)}" alt="" hidden></span>`
 }
 
 function showBookCover(image, url) {
@@ -538,14 +540,16 @@ function renderLibrary() {
     const progress = progressFor(book.id)
     const index = state.books.indexOf(book)
     return `<article class="book-card">
-      <button class="book-card__open" type="button" data-open="${escapeHtml(book.id)}" aria-label="Read ${escapeHtml(book.title)}">
-        ${coverMarkup(book, index)}
-        <span class="book-card__meta"><b>${escapeHtml(book.title)}</b><span>${escapeHtml(book.author || 'Unknown author')}</span>${progress ? `<span class="book-card__read">${progress.percentage || 0}% read</span>` : ''}</span>
-      </button>
-      <div class="book-card__actions">
-        <button class="book-card__action book-card__download" type="button" data-download="${escapeHtml(book.id)}" aria-label="Download ${escapeHtml(book.title)} as EPUB" title="Download EPUB"><i data-lucide="download"></i></button>
-        <button class="book-card__action book-card__remove" type="button" data-remove="${escapeHtml(book.id)}" aria-label="Remove ${escapeHtml(book.title)}" title="Remove book"><i data-lucide="trash-2"></i></button>
+      <div class="book-card__artwork">
+        <button class="book-card__open" type="button" data-open="${escapeHtml(book.id)}" aria-label="Read ${escapeHtml(book.title)}">
+          ${coverMarkup(book, index)}
+        </button>
+        <div class="book-card__actions" role="group" aria-label="Actions for ${escapeHtml(book.title)}">
+          <button class="book-card__action book-card__download" type="button" data-download="${escapeHtml(book.id)}" aria-label="Download ${escapeHtml(book.title)} as EPUB" title="Download EPUB"><i data-lucide="download"></i></button>
+          <button class="book-card__action book-card__remove" type="button" data-remove="${escapeHtml(book.id)}" aria-label="Remove ${escapeHtml(book.title)}" title="Remove book"><i data-lucide="trash-2"></i></button>
+        </div>
       </div>
+      <div class="book-card__meta"><span>${escapeHtml(book.author || 'Unknown author')}</span>${progress ? `<span class="book-card__read">${progress.percentage || 0}%</span>` : ''}</div>
     </article>`
   }).join('')
   loadRenderedBookCovers()
@@ -1754,6 +1758,7 @@ async function measureBookPageCount(active, token) {
 async function openBook(id) {
   const record = state.books.find((book) => book.id === id)
   if (!record) return
+  clearReaderUiTimer()
   if (state.active) {
     cancelBookPageCount(state.active)
     state.active.rendition.destroy()
@@ -1924,6 +1929,7 @@ async function openBook(id) {
     window.addEventListener('resize', requestBookPageCount)
   }
   requestBookPageCount()
+  showReaderUi()
   book.locations.generate(1000).then(() => {
     if (state.active?.record.id === id) updateReadingPosition(rendition.currentLocation())
   }).catch((error) => {
@@ -2059,6 +2065,13 @@ function setReaderPreference(name, value) {
 function setReaderSettingsOpen(open) {
   $('#reader-settings').hidden = !open
   $('#reader-settings-button').setAttribute('aria-expanded', String(open))
+  if (open) {
+    clearTimeout(readerUiTimer)
+    readerUiTimer = null
+    $('#reader-screen').classList.remove('reader-screen--ui-hidden')
+  } else {
+    scheduleReaderUiHide()
+  }
 }
 
 function applyReaderTheme() {
@@ -2109,6 +2122,7 @@ function applyRenditionReaderTheme(rendition, preferences) {
 }
 
 function closeReader() {
+  clearReaderUiTimer()
   if (state.active) {
     cancelBookPageCount(state.active)
     state.active.rendition.destroy()
@@ -2120,6 +2134,40 @@ function closeReader() {
   $('#library-screen').hidden = false
   setActiveNavigation('library')
   renderLibrary()
+}
+
+function showReaderUi() {
+  const screen = $('#reader-screen')
+  if (!state.active || screen.hidden) return
+  screen.classList.remove('reader-screen--ui-hidden')
+  scheduleReaderUiHide()
+}
+
+function readerNavigationPanelOpen() {
+  return !$('#reader-settings').hidden || !$('#toc-panel').hidden || !$('#bookmark-panel').hidden
+}
+
+function scheduleReaderUiHide() {
+  clearTimeout(readerUiTimer)
+  readerUiTimer = null
+  if (!state.active || $('#reader-screen').hidden || readerNavigationPanelOpen()) return
+  readerUiTimer = setTimeout(hideReaderUi, 3000)
+}
+
+function hideReaderUi() {
+  readerUiTimer = null
+  const screen = $('#reader-screen')
+  if (!state.active || screen.hidden || readerNavigationPanelOpen()) return
+  $('#toc-panel').hidden = true
+  $('#bookmark-panel').hidden = true
+  $('#bookmarks-button').setAttribute('aria-expanded', 'false')
+  screen.classList.add('reader-screen--ui-hidden')
+}
+
+function clearReaderUiTimer() {
+  clearTimeout(readerUiTimer)
+  readerUiTimer = null
+  $('#reader-screen').classList.remove('reader-screen--ui-hidden')
 }
 
 $('#library-nav').addEventListener('click', showLibrary)
@@ -2303,6 +2351,56 @@ $('#reader-prev-page').addEventListener('click', () => turnActivePage('prev'))
 $('#reader-next-page').addEventListener('click', () => turnActivePage('next'))
 $('#reader-prev-zone').addEventListener('click', () => turnActivePage('prev'))
 $('#reader-next-zone').addEventListener('click', () => turnActivePage('next'))
+const readerStage = $('.reader-stage')
+let readerTouchStart = null
+let suppressedReaderTap = null
+readerStage.addEventListener('touchstart', (event) => {
+  suppressedReaderTap = null
+  if (event.touches.length !== 1) {
+    readerTouchStart = null
+    return
+  }
+  const touch = event.touches[0]
+  readerTouchStart = { x: touch.clientX, y: touch.clientY }
+}, { passive: true })
+readerStage.addEventListener('touchmove', (event) => {
+  if (!readerTouchStart) return
+  if (event.touches.length !== 1) {
+    readerTouchStart = null
+    return
+  }
+  const touch = event.touches[0]
+  const deltaX = touch.clientX - readerTouchStart.x
+  const deltaY = touch.clientY - readerTouchStart.y
+  if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY) && event.cancelable) {
+    event.preventDefault()
+  }
+}, { passive: false })
+readerStage.addEventListener('touchend', (event) => {
+  if (!readerTouchStart) return
+  const start = readerTouchStart
+  readerTouchStart = null
+  const touch = event.changedTouches[0]
+  if (!touch) return
+  const deltaX = touch.clientX - start.x
+  const deltaY = touch.clientY - start.y
+  const swipeThreshold = Math.max(32, readerStage.clientWidth * 0.08)
+  if (Math.abs(deltaX) < swipeThreshold || Math.abs(deltaX) <= Math.abs(deltaY)) return
+
+  suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+  turnActivePage(deltaX < 0 ? 'next' : 'prev')
+}, { passive: true })
+readerStage.addEventListener('touchcancel', () => {
+  readerTouchStart = null
+}, { passive: true })
+readerStage.addEventListener('click', (event) => {
+  if (!suppressedReaderTap) return
+  const { x, y, expiresAt } = suppressedReaderTap
+  suppressedReaderTap = null
+  if (Date.now() >= expiresAt || Math.abs(event.clientX - x) >= 32 || Math.abs(event.clientY - y) >= 32) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+}, true)
 $('#toc-button').addEventListener('click', () => {
   $('#toc-panel').hidden = !$('#toc-panel').hidden
   $('#bookmark-panel').hidden = true
@@ -2351,6 +2449,10 @@ $('#reader-line-height').addEventListener('change', (event) => setReaderPreferen
 $('#reader-settings').addEventListener('click', (event) => {
   const theme = event.target.closest('[data-reader-theme]')
   if (theme) setReaderPreference('theme', theme.dataset.readerTheme)
+})
+const readerScreen = $('#reader-screen')
+;['pointerdown', 'touchstart', 'click', 'keydown', 'input', 'change'].forEach((eventName) => {
+  readerScreen.addEventListener(eventName, showReaderUi, { passive: eventName === 'touchstart' })
 })
 document.addEventListener('pointerdown', (event) => {
   const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement
