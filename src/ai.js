@@ -69,7 +69,7 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
   return manuscript.trim()
 }
 
-export async function generateOpenRouterImage({ apiKey, prompt }) {
+export async function generateOpenRouterImage({ apiKey, prompt, inputReferences = [], signal }) {
   const response = await fetch('https://openrouter.ai/api/v1/images', {
     method: 'POST',
     headers: {
@@ -78,12 +78,21 @@ export async function generateOpenRouterImage({ apiKey, prompt }) {
       'HTTP-Referer': window.location.origin,
       'X-OpenRouter-Title': 'Leaf',
     },
+    signal,
     body: JSON.stringify({
       model: 'black-forest-labs/flux-3-image-klein',
       prompt,
       resolution: '1K',
       aspect_ratio: '2:3',
       n: 1,
+      ...(inputReferences.length
+        ? {
+          input_references: inputReferences.map((url) => ({
+            type: 'image_url',
+            image_url: { url },
+          })),
+        }
+        : {}),
     }),
   })
 
@@ -111,5 +120,9 @@ export async function generateOpenRouterImage({ apiKey, prompt }) {
     data[index] = binary.charCodeAt(index)
   }
 
-  return { data, mediaType: image.media_type }
+  return {
+    data,
+    mediaType: image.media_type,
+    dataUrl: `data:${image.media_type};base64,${image.b64_json}`,
+  }
 }
