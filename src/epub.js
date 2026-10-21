@@ -49,17 +49,46 @@ function splitChapters(manuscript) {
   }))
 }
 
-export function createEpub({ title, author, manuscript, cover = null }) {
+function splitChapterContent(content) {
+  const blocks = []
+  let paragraph = []
+
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push({ type: 'p', text: paragraph.join('\n') })
+    paragraph = []
+  }
+
+  for (const line of String(content || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const heading = line.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      flushParagraph()
+      blocks.push({ type: 'h2', text: heading[2] })
+    } else if (line.trim()) {
+      paragraph.push(line)
+    } else {
+      flushParagraph()
+    }
+  }
+  flushParagraph()
+  return blocks
+}
+
+export function createEpub({ title, author, manuscript = '', chapters: sourceChapters, cover = null }) {
   const safeTitle = escapeXml(title || 'Untitled')
   const safeAuthor = escapeXml(author || 'Leaf reader')
-  const chapters = splitChapters(manuscript)
+  const chapters = Array.isArray(sourceChapters)
+    ? sourceChapters.map((chapter, index) => ({
+      title: String(chapter.title || `Chapter ${index + 1}`),
+      blocks: splitChapterContent(chapter.content),
+    }))
+    : splitChapters(manuscript)
   const coverMediaType = cover?.mediaType === 'image/png' || cover?.mediaType === 'image/jpeg' ? cover.mediaType : null
   const coverFileName = coverMediaType === 'image/png' ? 'cover.png' : 'cover.jpg'
   const coverBytes = coverMediaType && cover?.data ? (cover.data instanceof Uint8Array ? cover.data : new Uint8Array(cover.data)) : null
   const identifier = `urn:uuid:${createUuid()}`
   const chapterFiles = chapters.map((chapter, index) => {
     const fileName = `chapter-${String(index + 1).padStart(2, '0')}.xhtml`
-    const body = chapter.blocks.map((block) => `<${block.type}>${escapeXml(block.text)}</${block.type}>`).join('\n')
+    const body = chapter.blocks.map((block) => `<${block.type}>${escapeXml(block.text).replace(/\n/g, '<br />')}</${block.type}>`).join('\n')
     return {
       fileName,
       title: chapter.title,

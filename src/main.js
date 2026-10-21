@@ -54,8 +54,14 @@ const iconSet = {
   X,
 }
 
-const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper-white', aiBackgroundOpacity: 30 }
+const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
 const aiStoryReaderTheme = 'ai-story-background'
+const chapterDraftChunkCharacterLimit = 8000
+const chapterDraftChunkWordLimit = 1000
+const aiStoryThemeModes = {
+  light: { background: '#F4EBD9', color: '#342D22' },
+  dark: { background: '#1E2024', color: '#E9E6DF', dark: true },
+}
 const readerFonts = {
   serif: 'Georgia, serif',
   soft: 'Palatino Linotype, Book Antiqua, Palatino, serif',
@@ -77,6 +83,9 @@ const readerThemeImages = {
   linen: new URL(`${import.meta.env.BASE_URL}reader-themes/linen-weave.svg`, window.location.href).href,
   watercolor: new URL(`${import.meta.env.BASE_URL}reader-themes/watercolor-wash.svg`, window.location.href).href,
   recycled: new URL(`${import.meta.env.BASE_URL}reader-themes/recycled-paper.svg`, window.location.href).href,
+  cotton: new URL(`${import.meta.env.BASE_URL}reader-themes/cotton-paper.svg`, window.location.href).href,
+  newsprint: new URL(`${import.meta.env.BASE_URL}reader-themes/newsprint-paper.svg`, window.location.href).href,
+  rice: new URL(`${import.meta.env.BASE_URL}reader-themes/rice-paper.svg`, window.location.href).href,
 }
 const readerThemes = {
   'paper-white': { background: '#FAF9F6', color: '#242424' },
@@ -96,25 +105,43 @@ const readerThemes = {
   'ocean-gradient': { background: '#DCE9EC', color: '#26373B', backgroundGradient: 'linear-gradient(135deg, #DCE9EC 0%, #BBD8D7 50%, #B9C9E5 100%)' },
   'meadow-gradient': { background: '#E4EBD9', color: '#2D382D', backgroundGradient: 'linear-gradient(135deg, #EEF0DC 0%, #D2E4CE 52%, #B9D9D0 100%)' },
   'aurora-gradient': { background: '#26313E', color: '#F0EDF1', dark: true, backgroundGradient: 'linear-gradient(135deg, #1C2D40 0%, #31535B 52%, #54344F 100%)' },
+  'blush-gradient': { background: '#F4DDE4', color: '#3D2835', backgroundGradient: 'linear-gradient(135deg, #FCE8EC 0%, #EDC2D5 52%, #D7C7F3 100%)' },
+  'citrus-gradient': { background: '#F4E5B6', color: '#3B3320', backgroundGradient: 'linear-gradient(135deg, #FFF1BD 0%, #F3CF8B 48%, #C6DEBD 100%)' },
+  'rosewood-gradient': { background: '#EAD8CC', color: '#392B2B', backgroundGradient: 'linear-gradient(135deg, #F3E2D4 0%, #D6B2A2 48%, #8D879D 100%)' },
+  'glacier-gradient': { background: '#DCEBF2', color: '#26343D', backgroundGradient: 'linear-gradient(135deg, #EAF5F8 0%, #B4D9E5 50%, #C8C1E2 100%)' },
   'parchment-grain': { background: '#F4EBD9', color: '#342D22', backgroundImage: readerThemeImages.parchment },
   'botanical-paper': { background: '#EDF2E7', color: '#29342C', backgroundImage: readerThemeImages.botanical },
   'linen-weave': { background: '#F0ECE2', color: '#302D28', backgroundImage: readerThemeImages.linen },
   'watercolor-wash': { background: '#F3E9E4', color: '#352D32', backgroundImage: readerThemeImages.watercolor },
   'recycled-paper': { background: '#F3EFDF', color: '#332F28', backgroundImage: readerThemeImages.recycled },
+  'cotton-paper': { background: '#F5F0E8', color: '#39332D', backgroundImage: readerThemeImages.cotton },
   [aiStoryReaderTheme]: { background: '#F4EBD9', color: '#342D22', aiStory: true },
   'lemon-cream': { background: '#FAF3CE', color: '#38311B' },
   'terracotta-paper': { background: '#F2DDD3', color: '#462D25' },
   'soft-charcoal': { background: '#1E2024', color: '#E9E6DF', dark: true },
   'true-night': { background: '#121212', color: '#EAE7E2', dark: true },
-  'midnight-navy': { background: '#172235', color: '#E5ECF6', dark: true },
-  'forest-night': { background: '#1B2A24', color: '#E4EEE6', dark: true },
-  'midnight-plum': { background: '#2B202F', color: '#F2E8F4', dark: true },
+  'midnight-navy': { background: '#27313E', color: '#ECEFF4', dark: true },
+  'forest-night': { background: '#2C332B', color: '#E8EBE4', dark: true },
+  'midnight-plum': { background: '#332F36', color: '#EEEAF0', dark: true },
+  'deep-ocean': { background: '#283435', color: '#E5ECEB', dark: true },
+  'storm-slate': { background: '#353F4E', color: '#EFF3F8', dark: true },
+  'burgundy-night': { background: '#33232D', color: '#F2E8ED', dark: true },
+  'newsprint-paper': { background: '#F1EEE5', color: '#34312B', backgroundImage: readerThemeImages.newsprint },
+  'rice-paper': { background: '#F4F0E4', color: '#342F28', backgroundImage: readerThemeImages.rice },
 }
 const coverArtStyles = {
   photographic: 'photographic',
   illustrated: 'editorial illustration',
   watercolor: 'watercolor illustration',
   minimalist: 'minimalist graphic design',
+  linocut: 'bold linocut printmaking',
+  collage: 'layered mixed-media collage',
+  engraving: 'vintage etched engraving',
+  graphicNovel: 'graphic-novel illustration with expressive ink lines',
+  paperCut: 'layered paper-cut illustration',
+  surrealist: 'surrealist fine-art painting',
+  geometric: 'geometric vector illustration',
+  inkWash: 'expressive ink-wash painting',
 }
 const coverMoods = {
   serene: 'serene and contemplative',
@@ -122,6 +149,75 @@ const coverMoods = {
   mysterious: 'mysterious and atmospheric',
   dramatic: 'dramatic and cinematic',
   hopeful: 'hopeful and uplifting',
+  romantic: 'romantic and tender',
+  eerie: 'eerie and uncanny',
+  adventurous: 'adventurous and exploratory',
+  nostalgic: 'nostalgic and wistful',
+  melancholic: 'melancholic and reflective',
+  cozy: 'cozy and intimate',
+  dreamlike: 'dreamlike and ethereal',
+  triumphant: 'triumphant and awe-inspiring',
+  suspenseful: 'tense and suspenseful',
+}
+const coverDesignVariations = [
+  {
+    composition: 'a close-up symbolic object with dramatic cropped framing',
+    palette: 'deep jewel tones with one luminous accent',
+    typography: 'a refined high-contrast serif title with a small author credit',
+  },
+  {
+    composition: 'a tiny lone figure against a vast atmospheric landscape',
+    palette: 'misty cool blues and quiet silver highlights',
+    typography: 'an airy modern sans-serif title with generous spacing',
+  },
+  {
+    composition: 'a layered double-exposure portrait with scenery inside the silhouette',
+    palette: 'muted earth tones with a warm copper accent',
+    typography: 'an elegant editorial serif title placed in clear negative space',
+  },
+  {
+    composition: 'an overhead still life of meaningful objects from the story',
+    palette: 'rich botanical greens, parchment, and restrained gold',
+    typography: 'a compact uppercase title with understated author lettering',
+  },
+  {
+    composition: 'a sweeping diagonal arrangement that suggests motion and discovery',
+    palette: 'vivid complementary colors with bold light-dark contrast',
+    typography: 'a confident condensed display title with a discreet author line',
+  },
+  {
+    composition: 'a split scene contrasting two places or emotional states',
+    palette: 'a deliberate split between warm amber and cool indigo',
+    typography: 'an asymmetric title block aligned to one side of the composition',
+  },
+  {
+    composition: 'a monumental silhouette surrounded by intricate tiny details',
+    palette: 'near-black shadows with vivid jewel-like highlights',
+    typography: 'a dramatic classic serif title with a quiet author credit',
+  },
+  {
+    composition: 'a luminous doorway or window framing an unexpected world',
+    palette: 'soft twilight violet, rose, and pale gold',
+    typography: 'a graceful literary serif title with a modest author line',
+  },
+  {
+    composition: 'an intimate character portrait with an unusual point of view',
+    palette: 'restrained neutrals with one saturated focal color',
+    typography: 'a clean contemporary title treatment with balanced spacing',
+  },
+  {
+    composition: 'an asymmetrical collage of overlapping foreground layers',
+    palette: 'a tactile mix of faded ink, cream, and bright vermilion',
+    typography: 'a distinctive hand-cut inspired title with clearly printed lettering',
+  },
+]
+let previousCoverDesignVariation = null
+
+function chooseCoverDesignVariation() {
+  const choices = coverDesignVariations.filter((variation) => variation !== previousCoverDesignVariation)
+  const variation = choices[Math.floor(Math.random() * choices.length)]
+  previousCoverDesignVariation = variation
+  return variation
 }
 const legacyReaderThemeAliases = {
   paper: 'paper-white',
@@ -148,12 +244,15 @@ function loadReaderPreferences() {
     const lineHeight = Number(preferences.lineHeight)
     const aiBackgroundOpacity = Number(preferences.aiBackgroundOpacity)
     return {
-      fontSize: Number.isFinite(size) ? Math.min(160, Math.max(100, size)) : readerPreferenceDefaults.fontSize,
+      fontSize: Number.isFinite(size) ? Math.min(200, Math.max(50, size)) : readerPreferenceDefaults.fontSize,
       font: Object.hasOwn(readerFonts, preferences.font) ? preferences.font : readerPreferenceDefaults.font,
       lineHeight: [1.5, 1.75, 2].includes(lineHeight) ? lineHeight : readerPreferenceDefaults.lineHeight,
       aiBackgroundOpacity: Number.isFinite(aiBackgroundOpacity)
         ? Math.min(100, Math.max(0, aiBackgroundOpacity))
         : readerPreferenceDefaults.aiBackgroundOpacity,
+      aiBackgroundMode: Object.hasOwn(aiStoryThemeModes, preferences.aiBackgroundMode)
+        ? preferences.aiBackgroundMode
+        : readerPreferenceDefaults.aiBackgroundMode,
       theme: Object.hasOwn(readerThemes, preferences.theme)
         ? preferences.theme
         : Object.hasOwn(legacyReaderThemeAliases, preferences.theme)
@@ -230,6 +329,7 @@ const state = {
 }
 let saveTimer
 let writerAutosaveTimer = null
+let writerSaveInProgress = false
 let readerUiTimer = null
 const writerAutosaveTasks = new Set()
 
@@ -362,8 +462,8 @@ app.innerHTML = `
                       <input id="auto-fill-chapters" type="checkbox" />
                       <span>Auto</span>
                     </label>
-                    <button class="icon-button chapter-remove-button" type="button" id="remove-chapter" aria-label="Remove current chapter" title="Remove current chapter"><i data-lucide="trash-2"></i></button>
                     <button class="button button--primary" type="button" id="generate-chapter"><i data-lucide="sparkles"></i><span>Generate chapter</span></button>
+                    <button class="icon-button chapter-remove-button" type="button" id="remove-chapter" aria-label="Remove current chapter" title="Remove current chapter"><i data-lucide="trash-2"></i></button>
                   </div>
                 </div>
               </section>
@@ -401,7 +501,7 @@ app.innerHTML = `
                 <div class="cover-card__content">
                   <div class="cover-card__heading">
                     <span class="cover-card__eyebrow">OPTIONAL BOOK ART</span>
-                    <p>Upload artwork or create an AI cover with your book title included.</p>
+                    <p>Upload artwork or create an AI cover with your book title and author included.</p>
                   </div>
                   <div class="cover-card__options">
                     <label class="writer-field" for="cover-art-style">Art style
@@ -410,6 +510,14 @@ app.innerHTML = `
                         <option value="illustrated">Illustration</option>
                         <option value="watercolor">Watercolor</option>
                         <option value="minimalist">Minimalist</option>
+                        <option value="linocut">Linocut print</option>
+                        <option value="collage">Mixed-media collage</option>
+                        <option value="engraving">Vintage engraving</option>
+                        <option value="graphicNovel">Graphic novel</option>
+                        <option value="paperCut">Paper cut</option>
+                        <option value="surrealist">Surrealist</option>
+                        <option value="geometric">Geometric</option>
+                        <option value="inkWash">Ink wash</option>
                       </select>
                     </label>
                     <label class="writer-field" for="cover-mood">Mood
@@ -420,6 +528,15 @@ app.innerHTML = `
                         <option value="mysterious">Mysterious</option>
                         <option value="dramatic">Dramatic</option>
                         <option value="hopeful">Hopeful</option>
+                        <option value="romantic">Romantic</option>
+                        <option value="eerie">Eerie</option>
+                        <option value="adventurous">Adventurous</option>
+                        <option value="nostalgic">Nostalgic</option>
+                        <option value="melancholic">Melancholic</option>
+                        <option value="cozy">Cozy</option>
+                        <option value="dreamlike">Dreamlike</option>
+                        <option value="triumphant">Triumphant</option>
+                        <option value="suspenseful">Suspenseful</option>
                       </select>
                     </label>
                   </div>
@@ -432,7 +549,7 @@ app.innerHTML = `
                     <button class="button button--primary" type="button" id="keep-cover" hidden><i data-lucide="check"></i><span>Keep</span></button>
                     <button class="button button--outline" type="button" id="undo-cover" hidden><i data-lucide="rotate-ccw"></i><span>Undo</span></button>
                   </div>
-                  <p class="cover-card__title-warning" id="cover-title-warning" hidden>The generated cover title no longer matches. Regenerate the cover before saving.</p>
+                  <p class="cover-card__title-warning" id="cover-title-warning" hidden>The generated cover title or author no longer matches. Regenerate the cover before saving.</p>
                   <p class="cover-card__note">PNG or JPEG · AI covers use two image generations with your OpenRouter key; provider charges may apply for each.</p>
                 </div>
               </div>
@@ -442,7 +559,10 @@ app.innerHTML = `
               <button class="button button--outline" type="button" id="wizard-back" disabled>Back</button>
               <span id="wizard-step-count" aria-live="polite">Step 1 of 5</span>
               <button class="button button--primary" type="button" id="wizard-next" disabled><span>Continue</span></button>
-              <button class="button button--primary writer-save" type="button" id="save-draft" disabled hidden><i data-lucide="save"></i><span>Save to library</span></button>
+              <div class="writer-save-actions" hidden>
+                <button class="button button--outline writer-copy" type="button" id="copy-draft" disabled><span>Copy</span></button>
+                <button class="button button--primary writer-save" type="button" id="save-draft" disabled><span>Save</span></button>
+              </div>
             </div>
           </div>
         </div>
@@ -460,61 +580,84 @@ app.innerHTML = `
         </header>
         <aside class="reader-settings" id="reader-settings" aria-label="Reading settings" hidden>
           <div class="reader-settings__header"><h2>Reading settings</h2><div><button class="reader-settings__reset" type="button" id="reset-reader-settings"><i data-lucide="rotate-ccw"></i><span>Reset</span></button><button class="icon-button" type="button" id="close-reader-settings" aria-label="Close reading settings"><i data-lucide="x"></i></button></div></div>
-          <label class="reader-setting" for="reader-font-size"><span>Text size <output id="reader-font-size-value">100%</output></span><input id="reader-font-size" type="range" min="100" max="160" step="5" value="100" /></label>
-          <label class="reader-setting" for="reader-font-family"><span>Typeface</span><select id="reader-font-family">
-            <optgroup label="Serif"><option value="serif">Georgia</option><option value="soft">Palatino</option><option value="garamond">Garamond</option><option value="bookman">Bookman</option></optgroup>
-            <optgroup label="Sans-serif"><option value="sans">Arial</option><option value="system">System UI</option><option value="segoe">Segoe UI</option><option value="helvetica">Helvetica</option><option value="roboto">Roboto</option><option value="tahoma">Tahoma</option><option value="openSans">Open Sans</option><option value="verdana">Verdana</option><option value="trebuchet">Trebuchet</option></optgroup>
-          </select></label>
-          <label class="reader-setting" for="reader-line-height"><span>Line spacing</span><select id="reader-line-height"><option value="1.5">Compact</option><option value="1.75" selected>Relaxed</option><option value="2">Open</option></select></label>
           <div class="reader-font-preview" id="reader-font-preview">
             <span class="reader-font-preview__label">Preview</span>
             <p id="reader-font-preview-text">The quick brown fox jumps over the lazy dog.</p>
           </div>
+          <label class="reader-setting reader-font-size-setting" for="reader-font-size">
+            <span>Text size</span>
+            <div class="reader-font-size-control">
+              <span class="reader-font-size-control__small" aria-hidden="true">A</span>
+              <input id="reader-font-size" type="range" min="50" max="200" value="100" />
+              <output id="reader-font-size-value">100%</output>
+              <span class="reader-font-size-control__large" aria-hidden="true">A</span>
+            </div>
+          </label>
+          <label class="reader-setting" for="reader-font-family"><span>Typeface</span><select id="reader-font-family">
+            <optgroup label="Serif"><option value="serif">Georgia</option><option value="soft">Palatino</option><option value="garamond">Garamond</option><option value="bookman">Bookman</option></optgroup>
+            <optgroup label="Sans-serif"><option value="sans">Arial</option><option value="system">System UI</option><option value="segoe">Segoe UI</option><option value="helvetica">Helvetica</option><option value="roboto">Roboto</option><option value="tahoma">Tahoma</option><option value="openSans">Open Sans</option><option value="verdana">Verdana</option><option value="trebuchet">Trebuchet</option></optgroup>
+          </select></label>
+          <div class="reader-setting">
+            <span>Line spacing</span>
+            <div class="reader-line-spacing-options" id="reader-line-spacing-options" role="group" aria-label="Line spacing">
+              <button class="reader-line-spacing-option" type="button" data-reader-line-height="1.5" aria-label="Compact line spacing" title="Compact" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+              </button>
+              <button class="reader-line-spacing-option" type="button" data-reader-line-height="1.75" aria-label="Relaxed line spacing" title="Relaxed" aria-pressed="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h16M4 9.5h16M4 14.5h16M4 19.5h16" /></svg>
+              </button>
+              <button class="reader-line-spacing-option" type="button" data-reader-line-height="2" aria-label="Open line spacing" title="Open" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16M4 9h16M4 15h16M4 21h16" /></svg>
+              </button>
+            </div>
+          </div>
           <fieldset class="reader-theme-picker"><legend>Page theme</legend><div class="reader-theme-options">
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Light &amp; paper themes</span><div class="reader-theme-category-options">
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Light</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="paper-white" style="--reader-theme-background:#FAF9F6" aria-pressed="true"><span class="reader-theme-option__swatch"></span><span>Paper White</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="warm-ivory" style="--reader-theme-background:#FFF8E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Warm Ivory</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="classic-parchment" style="--reader-theme-background:#F4E8D2" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Classic Parchment</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="vintage-sepia" style="--reader-theme-background:#EAD8B5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Vintage Sepia</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="oat-milk" style="--reader-theme-background:#EEE4D3" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Oat Milk</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="cloud-gray" style="--reader-theme-background:#F1F3F5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Cloud Gray</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="warm-gray" style="--reader-theme-background:#E7E2DC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Warm Gray</span></button>
-            </div></div>
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Soft &amp; colorful themes</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="peach-bloom" style="--reader-theme-background:#FBE4D5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Peach Bloom</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="rose-blush" style="--reader-theme-background:#F6E1E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rose Blush</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="lavender-mist" style="--reader-theme-background:#EEE7F8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lavender Mist</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="powder-blue" style="--reader-theme-background:#E6F1F8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Powder Blue</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="mint-leaf" style="--reader-theme-background:#E3F2E8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Mint Leaf</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="sage-garden" style="--reader-theme-background:#DEE8DC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sage Garden</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="lemon-cream" style="--reader-theme-background:#FAF3CE" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Lemon Cream</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="terracotta-paper" style="--reader-theme-background:#F2DDD3" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Terracotta Paper</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="vintage-sepia" style="--reader-theme-background:#EAD8B5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Vintage Sepia</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="powder-blue" style="--reader-theme-background:#E6F1F8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Powder Blue</span></button>
             </div></div>
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Gradient themes</span><div class="reader-theme-category-options">
-              <button class="reader-theme-option" type="button" data-reader-theme="sunset-gradient" style="--reader-theme-background:#F1D9D1" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sunset</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="ocean-gradient" style="--reader-theme-background:#DCE9EC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Ocean</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="meadow-gradient" style="--reader-theme-background:#E4EBD9" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Meadow</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="aurora-gradient" style="--reader-theme-background:#26313E" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Aurora</span></button>
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Dark</span><div class="reader-theme-category-options">
+              <button class="reader-theme-option" type="button" data-reader-theme="soft-charcoal" style="--reader-theme-background:#1E2024" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Soft Charcoal</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="true-night" style="--reader-theme-background:#121212" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>True Night</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="midnight-navy" style="--reader-theme-background:#27313E" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Ink Blue</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="forest-night" style="--reader-theme-background:#2C332B" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Olive Charcoal</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="midnight-plum" style="--reader-theme-background:#332F36" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Smoke Plum</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="deep-ocean" style="--reader-theme-background:#283435" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Deep Teal</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="storm-slate" style="--reader-theme-background:#353F4E" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Storm Slate</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="burgundy-night" style="--reader-theme-background:#33232D" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Burgundy Night</span></button>
             </div></div>
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Textured paper themes</span><div class="reader-theme-category-options">
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Textured</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="parchment-grain" style="--reader-theme-background:#F4EBD9" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Parchment Grain</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="botanical-paper" style="--reader-theme-background:#EDF2E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Botanical Paper</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="linen-weave" style="--reader-theme-background:#F0ECE2" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Linen Weave</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="watercolor-wash" style="--reader-theme-background:#F3E9E4" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Watercolor Wash</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="recycled-paper" style="--reader-theme-background:#F3EFDF" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Recycled Paper</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="cotton-paper" style="--reader-theme-background:#F5F0E8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Cotton Paper</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="newsprint-paper" style="--reader-theme-background:#F1EEE5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Newsprint</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="rice-paper" style="--reader-theme-background:#F4F0E4" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rice Paper</span></button>
             </div></div>
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Dark &amp; immersive themes</span><div class="reader-theme-category-options">
-              <button class="reader-theme-option" type="button" data-reader-theme="soft-charcoal" style="--reader-theme-background:#1E2024" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Soft Charcoal</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="true-night" style="--reader-theme-background:#121212" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>True Night</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="midnight-navy" style="--reader-theme-background:#172235" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Midnight Navy</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="forest-night" style="--reader-theme-background:#1B2A24" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Forest Night</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="midnight-plum" style="--reader-theme-background:#2B202F" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Midnight Plum</span></button>
+            <div class="reader-theme-category"><span class="reader-theme-category__label">Gradient</span><div class="reader-theme-category-options">
+              <button class="reader-theme-option" type="button" data-reader-theme="sunset-gradient" style="--reader-theme-background:#F1D9D1" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sunset</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="ocean-gradient" style="--reader-theme-background:#DCE9EC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Ocean</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="meadow-gradient" style="--reader-theme-background:#E4EBD9" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Meadow</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="aurora-gradient" style="--reader-theme-background:#26313E" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Aurora</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="blush-gradient" style="--reader-theme-background:#F4DDE4" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Blush</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="citrus-gradient" style="--reader-theme-background:#F4E5B6" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Citrus</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="rosewood-gradient" style="--reader-theme-background:#EAD8CC" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rosewood</span></button>
+              <button class="reader-theme-option" type="button" data-reader-theme="glacier-gradient" style="--reader-theme-background:#DCEBF2" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Glacier</span></button>
             </div></div>
             <div class="reader-theme-category"><span class="reader-theme-category__label">AI story background</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="${aiStoryReaderTheme}" style="--reader-theme-background:#F4EBD9" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>AI Story</span></button>
             </div><p class="reader-theme-note">Uses your OpenRouter key and text from the next 10 pages to generate an image. Provider charges may apply.</p></div>
           </div></fieldset>
             <label class="reader-setting" id="reader-ai-background-opacity-setting" for="reader-ai-background-opacity" hidden><span>AI background opacity <output id="reader-ai-background-opacity-value">30%</output></span><input id="reader-ai-background-opacity" type="range" min="0" max="100" step="5" value="30" /></label>
+            <label class="reader-setting" id="reader-ai-background-mode-setting" for="reader-ai-background-mode" hidden><span>AI background mode</span><select id="reader-ai-background-mode"><option value="light">Light</option><option value="dark">Dark</option></select></label>
         </aside>
         <div class="reader-layout">
           <aside class="toc-panel" id="toc-panel" hidden><div class="toc-panel__head"><h2>Contents</h2><button class="icon-button" type="button" id="toc-close" aria-label="Close contents"><i data-lucide="x"></i></button></div><nav id="chapter-list" class="chapter-list"></nav></aside>
@@ -562,6 +705,23 @@ async function storeRequest(storeName, mode, action) {
     const request = action(transaction.objectStore(storeName))
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
+  })
+}
+
+async function storeTransaction(storeNames, mode, action) {
+  const db = await database
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeNames, mode)
+    try {
+      action(transaction)
+    } catch (error) {
+      transaction.abort()
+      reject(error)
+      return
+    }
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed.'))
+    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction was aborted.'))
   })
 }
 
@@ -717,7 +877,7 @@ function renderWriterLibraryOptions() {
 }
 
 const ignoredEpubTags = new Set(['HEAD', 'SCRIPT', 'STYLE', 'TITLE', 'NAV', 'NOSCRIPT', 'SVG'])
-const blockEpubTags = new Set(['ADDRESS', 'ARTICLE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TR'])
+const blockEpubTags = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'LI', 'MAIN', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TD', 'TH', 'TR', 'UL'])
 
 function epubTagName(node) {
   return String(node.localName || node.nodeName || '').split(':').pop().toUpperCase()
@@ -746,6 +906,10 @@ function textFromEpubNode(node, excludedNode = null) {
   const tag = epubTagName(node)
   if (ignoredEpubTags.has(tag)) return ''
   if (tag === 'BR') return '\n'
+  if (tag === 'IMG') {
+    const alt = node.getAttribute('alt')
+    return alt ? ` ${alt} ` : ''
+  }
   const text = Array.from(node.childNodes || [])
     .map((child) => textFromEpubNode(child, excludedNode))
     .join('')
@@ -786,12 +950,10 @@ async function readEpubChapters(data) {
     await book.ready
     const [metadata, navigation] = await Promise.all([book.loaded.metadata, book.loaded.navigation])
     const allSections = book.spine.spineItems || []
-    const linearSections = allSections.filter((section) => section.linear)
-    const sections = linearSections.length ? linearSections : allSections
     const navigationTitles = epubNavigationTitles(navigation?.toc, book)
     const chapters = []
 
-    for (const section of sections) {
+    for (const section of allSections) {
       await section.load(book.load.bind(book))
       const chapter = extractEpubChapter(section, navigationTitles.get(section.index), chapters.length + 1)
       if (chapter) chapters.push(chapter)
@@ -858,6 +1020,7 @@ function showWriter() {
   $('#library-screen').hidden = true
   $('#reader-screen').hidden = true
   $('#writer-screen').hidden = false
+  restoreOpenRouterApiKey()
   setActiveNavigation('writer')
   renderWriterLibraryOptions()
   updateWriterControls()
@@ -904,7 +1067,7 @@ function renderWriterStep() {
   $('#wizard-step-count').textContent = `Step ${step} of 5`
   $('#wizard-back').disabled = busy || step === 1
   $('#wizard-next').hidden = step === 5
-  $('#save-draft').hidden = step !== 5
+  $('.writer-save-actions').hidden = step !== 5
   $('#wizard-next').disabled = busy || !canContinueWriterStep(step)
   const hasCurrentOutline = state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature()
   const nextLabel = step === 2
@@ -918,16 +1081,17 @@ function renderWriterStep() {
 }
 
 function updateWriterControls() {
-  const manuscript = state.writer.chapters.map((chapter) => chapter.content).join('\n')
   const title = $('#book-title').value.trim()
   const busy = state.writer.busy
-  const words = manuscript ? manuscript.split(/\s+/).length : 0
-  $('#draft-stats').textContent = words
-    ? `${state.writer.chapters.filter((chapter) => chapter.content.trim()).length} of ${state.writer.chapters.length} chapters · ${words.toLocaleString()} words`
+  const words = state.writer.chapters.reduce((total, chapter) => total + countWords(chapter.content), 0)
+  const activeChapter = state.writer.chapters[state.writer.currentChapter]
+  const currentChapterWords = countWords(activeChapter?.content)
+  $('#draft-stats').textContent = state.writer.chapters.length
+    ? `Chapter ${state.writer.currentChapter + 1}: ${currentChapterWords.toLocaleString()} words · Total: ${words.toLocaleString()} words`
     : state.writer.outline.length ? `${state.writer.outline.length} AI-suggested chapters` : 'Your book idea will guide the chapter suggestions.'
   $('#revise-outline').disabled = busy || !$('#outline-revision-request').value.trim() || !parseOutline($('#chapter-outline').value).length
-  const activeChapter = state.writer.chapters[state.writer.currentChapter]
   $('#generate-chapter').disabled = busy || state.writer.stage !== 'chapters' || !activeChapter
+  updateChapterActionButton(activeChapter)
   $('#auto-fill-chapters').disabled = busy
   $('#chapter-previous').disabled = busy || state.writer.currentChapter === 0
   $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !activeChapter?.content.trim()
@@ -937,11 +1101,19 @@ function updateWriterControls() {
   $('#cover-art-style').disabled = busy
   $('#cover-mood').disabled = busy
   const displayedCover = state.writer.coverCandidate || state.writer.cover
-  const coverTitleMismatch = displayedCover?.source === 'ai-titled' && displayedCover.generatedTitle !== title
-  $('#cover-title-warning').hidden = !coverTitleMismatch
-  $('#save-draft').disabled = busy || !state.writer.chapters.some((chapter) => chapter.content.trim()) || !title
-    || Boolean(state.writer.coverCandidate) || coverTitleMismatch
-  $('#save-draft').querySelector('span').textContent = state.writer.savedBookId ? 'Update saved book' : 'Save to library'
+  const author = $('#book-author').value.trim()
+  const coverAuthor = author || (displayedCover?.source === 'ai-titled' ? displayedCover.generatedAuthor || '' : '')
+  const coverTextMismatch = displayedCover?.source === 'ai-titled'
+    && (displayedCover.generatedTitle !== title
+      || (typeof displayedCover.generatedAuthor === 'string' && displayedCover.generatedAuthor !== coverAuthor))
+  $('#cover-title-warning').hidden = !coverTextMismatch
+  const canSaveBook = !busy
+    && state.writer.chapters.some((chapter) => chapter.content.trim())
+    && Boolean(title)
+    && !state.writer.coverCandidate
+    && !coverTextMismatch
+  $('#save-draft').disabled = !canSaveBook
+  $('#copy-draft').disabled = !canSaveBook
   const hasCoverCandidate = Boolean(state.writer.coverCandidate)
   $('#generate-cover').hidden = hasCoverCandidate
   $('#generate-cover').disabled = busy
@@ -950,6 +1122,12 @@ function updateWriterControls() {
   $('#undo-cover').hidden = !hasCoverCandidate
   $('#undo-cover').disabled = busy || !hasCoverCandidate
   $('#cover-input').disabled = busy
+  $('#book-title').disabled = writerSaveInProgress
+  $('#book-author').disabled = writerSaveInProgress
+  $('#book-topic').disabled = writerSaveInProgress
+  $('#page-count').disabled = writerSaveInProgress
+  $('#chapter-outline').disabled = writerSaveInProgress
+  $('#outline-revision-request').disabled = writerSaveInProgress
   $('#manuscript-editor').readOnly = busy || state.writer.stage !== 'chapters'
   $('#chapter-prompt').readOnly = busy || state.writer.stage !== 'chapters'
   $('#chapter-workflow').hidden = state.writer.stage !== 'chapters'
@@ -961,6 +1139,26 @@ function updateWriterControls() {
   $('#delete-writer-draft').hidden = !selectedDraft
   $('#delete-writer-draft').disabled = busy && selectedWriterItem === `draft:${state.writer.draftId}`
   renderWriterStep()
+}
+
+function countWords(text) {
+  return String(text || '').trim().split(/\s+/).filter(Boolean).length
+}
+
+function updateChapterActionButton(chapter) {
+  const button = $('#generate-chapter')
+  const hasUndo = typeof chapter?.undoContent === 'string'
+  const hasContent = Boolean(chapter?.content.trim())
+  const icon = hasUndo && !state.writer.busy ? 'rotate-ccw' : 'sparkles'
+  const label = state.writer.busy
+    ? hasContent ? 'Updating chapter...' : 'Writing chapter...'
+    : hasUndo ? 'Undo' : hasContent ? 'Update chapter' : 'Generate chapter'
+  button.querySelector('span').textContent = label
+  if (button.dataset.chapterActionIcon !== icon) {
+    button.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`
+    button.dataset.chapterActionIcon = icon
+    icons()
+  }
 }
 
 function continueWriterWorkflow() {
@@ -982,7 +1180,12 @@ function continueWriterWorkflow() {
       const existing = previousChapters.find((chapter) => chapter.title === title && !reusedChapters.has(chapter))
         || (!titles.includes(previousChapters[index]?.title) ? previousChapters[index] : null)
       if (existing) reusedChapters.add(existing)
-      return { title, content: existing?.content || '', prompt: existing?.prompt || '' }
+      return {
+        title,
+        content: existing?.content || '',
+        prompt: existing?.prompt || '',
+        undoContent: typeof existing?.undoContent === 'string' ? existing.undoContent : null,
+      }
     })
     state.writer.currentChapter = Math.min(state.writer.currentChapter, state.writer.chapters.length - 1)
     state.writer.stage = 'chapters'
@@ -1013,6 +1216,30 @@ function setWriterStatus(message, type = '') {
   if (type === 'error') showToast(message)
 }
 
+function persistOpenRouterApiKey(removeWhenEmpty = false) {
+  const key = $('#openrouter-key').value.trim()
+  try {
+    if (key) localStorage.setItem(openRouterKeyStorageKey, key)
+    else if (removeWhenEmpty) localStorage.removeItem(openRouterKeyStorageKey)
+    return key
+  } catch (error) {
+    console.error('Could not save the OpenRouter API key to local storage.', error)
+    setWriterStatus('Could not save the API key in this browser.', 'error')
+    return null
+  }
+}
+
+function restoreOpenRouterApiKey() {
+  const input = $('#openrouter-key')
+  if (input.value.trim()) return
+  try {
+    input.value = localStorage.getItem(openRouterKeyStorageKey) || ''
+  } catch (error) {
+    console.error('Could not load the OpenRouter API key from local storage.', error)
+    setWriterStatus('Could not access browser storage for your API key. Enter it again to continue.', 'error')
+  }
+}
+
 function writerDraftHasContent() {
   return Boolean(
     state.writer.draftId
@@ -1035,6 +1262,7 @@ function createWriterDraftRecord() {
     title: String(chapter.title || ''),
     content: String(chapter.content || ''),
     prompt: String(chapter.prompt || ''),
+    undoContent: typeof chapter.undoContent === 'string' ? chapter.undoContent : null,
   }))
   const manuscript = chapters.map((chapter) => chapter.content).filter(Boolean).join(' ')
   const topicTitle = $('#book-topic').value.trim().split(/\r?\n/)[0]
@@ -1075,6 +1303,7 @@ function createWriterDraftRecord() {
 }
 
 async function persistWriterDraft() {
+  if (writerSaveInProgress) return
   if (!writerDraftHasContent()) return
   if (!state.writer.draftId) state.writer.draftId = createUuid()
   const draft = createWriterDraftRecord()
@@ -1104,6 +1333,7 @@ function trackWriterAutosave(task) {
 }
 
 function scheduleWriterAutosave() {
+  if (writerSaveInProgress) return
   clearTimeout(writerAutosaveTimer)
   if (!writerDraftHasContent()) return
   writerAutosaveTimer = setTimeout(() => {
@@ -1134,6 +1364,7 @@ function resumeWriterDraft(draft) {
         title: String(chapter.title || `Chapter ${index + 1}`),
         content: String(chapter.content || ''),
         prompt: String(chapter.prompt || ''),
+        undoContent: typeof chapter.undoContent === 'string' ? chapter.undoContent : null,
       }))
     : []
   const savedStep = Number(savedWriter.wizardStep)
@@ -1193,10 +1424,6 @@ function setWriterBusy(busy, mode = '') {
   state.writer.busy = busy
   updateWriterControls()
   $('#revise-outline').querySelector('span').textContent = busy && mode === 'outline-revision' ? 'Working...' : 'Edit Chapters'
-  const chapter = state.writer.chapters[state.writer.currentChapter]
-  $('#generate-chapter').querySelector('span').textContent = busy && mode === 'chapter'
-    ? (chapter?.content.trim() ? 'Updating chapter...' : 'Writing chapter...')
-    : (chapter?.content.trim() ? 'Update chapter' : 'Generate chapter')
   $('#generate-cover').querySelector('span').textContent = busy && mode === 'cover-background'
     ? 'Generating background...'
     : busy && mode === 'cover-title'
@@ -1223,7 +1450,6 @@ function renderCurrentChapter() {
   $('#chapter-position').textContent = `Chapter ${state.writer.currentChapter + 1} of ${state.writer.chapters.length}`
   $('#chapter-previous').disabled = state.writer.busy || state.writer.currentChapter === 0
   $('#chapter-next').disabled = state.writer.busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !chapter.content.trim()
-  $('#generate-chapter').querySelector('span').textContent = chapter.content.trim() ? 'Update chapter' : 'Generate chapter'
   updateWriterControls()
   scheduleWriterAutosave()
 }
@@ -1295,6 +1521,17 @@ function removeCurrentChapter() {
   state.writer.currentChapter = Math.min(index, state.writer.chapters.length - 1)
   renderCurrentChapter()
   setWriterStatus(`Removed "${chapter.title}" and its generated text from the draft.`)
+}
+
+function undoGeneratedChapter() {
+  if (state.writer.busy) return
+  const chapter = state.writer.chapters[state.writer.currentChapter]
+  if (typeof chapter?.undoContent !== 'string') return
+  chapter.content = chapter.undoContent
+  chapter.undoContent = null
+  $('#manuscript-editor').value = chapter.content
+  renderCurrentChapter()
+  setWriterStatus(`Undid the latest generation for "${chapter.title}".`)
 }
 
 async function loadSelectedWriterItem() {
@@ -1393,6 +1630,7 @@ async function loadLibraryBookIntoWriter(recordId) {
     state.writer.coverCandidateUrl = ''
     $('#cover-input').value = ''
     renderWriterCoverPreview()
+    state.writer.draftId = null
     state.writer.loadedBookId = record.id
     state.writer.savedBookId = null
     state.writer.stage = 'chapters'
@@ -1416,7 +1654,13 @@ async function loadLibraryBookIntoWriter(recordId) {
     state.writer.wizardStep = 4
     if (record.coverOriginal?.data && record.coverOriginal.mediaType) {
       const source = record.coverOriginal.generatedTitle ? 'ai-titled' : 'ai'
-      setWriterCover(record.coverOriginal.data, record.coverOriginal.mediaType, source, record.coverOriginal.generatedTitle || '')
+      setWriterCover(
+        record.coverOriginal.data,
+        record.coverOriginal.mediaType,
+        source,
+        record.coverOriginal.generatedTitle || '',
+        record.coverOriginal.generatedAuthor || '',
+      )
     } else if (cover) {
       setWriterCover(cover.data, cover.mediaType, 'existing')
     }
@@ -1450,7 +1694,7 @@ async function selectCover(file) {
   }
 }
 
-function setWriterCover(data, mediaType, source = 'upload', generatedTitle = '') {
+function setWriterCover(data, mediaType, source = 'upload', generatedTitle = '', generatedAuthor = '') {
   const coverData = data instanceof Uint8Array ? data : new Uint8Array(data)
   const previewUrl = URL.createObjectURL(new Blob([coverData], { type: mediaType }))
   discardWriterCoverCandidate()
@@ -1460,6 +1704,7 @@ function setWriterCover(data, mediaType, source = 'upload', generatedTitle = '')
     mediaType,
     source,
     ...(generatedTitle ? { generatedTitle } : {}),
+    ...(generatedAuthor ? { generatedAuthor } : {}),
   }
   state.writer.coverUrl = previewUrl
   renderWriterCoverPreview()
@@ -1483,7 +1728,7 @@ function renderWriterCoverPreview() {
   updateCoverTitleOverlay()
 }
 
-function setWriterCoverCandidate(data, mediaType, source = 'ai', generatedTitle = '') {
+function setWriterCoverCandidate(data, mediaType, source = 'ai', generatedTitle = '', generatedAuthor = '') {
   const coverData = data instanceof Uint8Array ? data : new Uint8Array(data)
   discardWriterCoverCandidate()
   state.writer.coverCandidate = {
@@ -1491,6 +1736,7 @@ function setWriterCoverCandidate(data, mediaType, source = 'ai', generatedTitle 
     mediaType,
     source,
     ...(generatedTitle ? { generatedTitle } : {}),
+    ...(generatedAuthor ? { generatedAuthor } : {}),
   }
   state.writer.coverCandidateUrl = URL.createObjectURL(new Blob([coverData], { type: mediaType }))
   renderWriterCoverPreview()
@@ -1520,14 +1766,27 @@ function undoWriterCoverCandidate() {
 function updateCoverTitleOverlay() {
   const overlay = $('#cover-title-overlay')
   const title = $('#book-title').value.trim()
+  const author = $('#book-author').value.trim()
   const cover = state.writer.coverCandidate || state.writer.cover
-  const showTitle = cover?.source === 'ai' && Boolean(title)
-  overlay.textContent = showTitle ? title : ''
-  overlay.hidden = !showTitle
+  const showText = ['ai', 'ai-background'].includes(cover?.source) && Boolean(title)
+  overlay.replaceChildren()
+  if (showText) {
+    const titleElement = document.createElement('span')
+    titleElement.className = 'cover-title-overlay__title'
+    titleElement.textContent = title
+    overlay.append(titleElement)
+    if (author) {
+      const authorElement = document.createElement('span')
+      authorElement.className = 'cover-title-overlay__author'
+      authorElement.textContent = author
+      overlay.append(authorElement)
+    }
+  }
+  overlay.hidden = !showText
 }
 
-async function createTitledCover(cover, title) {
-  if (cover?.source !== 'ai' || !title.trim()) return cover
+async function createTitledCover(cover, title, author) {
+  if (!['ai', 'ai-background'].includes(cover?.source) || !title.trim()) return cover
 
   const imageUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.mediaType }))
   const image = new Image()
@@ -1575,10 +1834,15 @@ async function createTitledCover(cover, title) {
     context.shadowColor = 'rgba(0, 0, 0, 0.45)'
     context.shadowBlur = fontSize * 0.12
     const lineHeight = fontSize * 1.15
-    const firstLineY = canvas.height * 0.92 - (lines.length - 1) * lineHeight
+    const firstLineY = canvas.height * (author.trim() ? 0.88 : 0.92) - (lines.length - 1) * lineHeight
     lines.forEach((line, index) => {
       context.fillText(line, canvas.width / 2, firstLineY + index * lineHeight, titleWidth)
     })
+    if (author.trim()) {
+      const authorFontSize = Math.max(12, Math.round(canvas.width * 0.035))
+      context.font = `500 ${authorFontSize}px Georgia, serif`
+      context.fillText(author.trim(), canvas.width / 2, canvas.height * 0.96, titleWidth)
+    }
 
     const output = await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
@@ -1595,7 +1859,10 @@ async function createTitledCover(cover, title) {
 async function generateWriterCover() {
   const apiKey = $('#openrouter-key').value.trim()
   const title = $('#book-title').value.trim()
-  const author = $('#book-author').value.trim()
+  const authorField = $('#book-author')
+  const author = authorField.value.trim()
+    || (state.writer.cover?.source === 'ai-titled' ? state.writer.cover.generatedAuthor : '')
+    || (state.writer.loadedBookId ? 'Leaf reader' : randomAiAuthorAlias())
   const topic = $('#book-topic').value.trim()
   if (!apiKey) {
     setWriterStatus('Add your OpenRouter API key to generate a cover.', 'error')
@@ -1607,24 +1874,31 @@ async function generateWriterCover() {
     $('#book-title').focus()
     return
   }
+  if (!authorField.value.trim()) {
+    authorField.value = author
+    updateWriterControls()
+    updateCoverTitleOverlay()
+    scheduleWriterAutosave()
+  }
 
   const chapterTitles = state.writer.chapters.map((chapter) => chapter.title).filter(Boolean).join('; ')
   const artStyle = coverArtStyles[$('#cover-art-style').value] || coverArtStyles.photographic
   const mood = coverMoods[$('#cover-mood').value]
-  const prompt = `Create an original, polished ${artStyle} front-cover image for a book titled "${title}"${author ? ` by ${author}` : ''}. Use this book idea as visual inspiration: ${topic || chapterTitles || title}. ${mood ? `Convey a ${mood} mood. ` : ''}${chapterTitles ? `Chapter themes: ${chapterTitles}. ` : ''}Make it a striking portrait composition with a clear focal subject that remains legible as a small thumbnail. No text, lettering, typography, logos, borders, or book mockups.`
+  const variation = chooseCoverDesignVariation()
+  const prompt = `Create an original, polished ${artStyle} front-cover image for a book titled "${title}"${author ? ` by ${author}` : ''}. Use this book idea as visual inspiration: ${topic || chapterTitles || title}. ${mood ? `Convey a ${mood} mood. ` : ''}${chapterTitles ? `Chapter themes: ${chapterTitles}. ` : ''}Give this generation a distinct visual approach: ${variation.composition}. Use a ${variation.palette} palette. Make it a striking portrait composition with a clear focal subject that remains legible as a small thumbnail. No text, lettering, typography, logos, borders, or book mockups.`
 
   setWriterBusy(true, 'cover-background')
   let background
   try {
     background = await generateOpenRouterImage({ apiKey, prompt })
     setWriterBusy(true, 'cover-title')
-    const titlePrompt = `Use the provided reference image as the background for a portrait book cover. Preserve its artwork, composition, subjects, and color palette. Add a polished, clearly legible title overlay with this exact text: ${JSON.stringify(title)}. Spell it exactly and place it where it does not obscure the focal subject. Do not add any other text, author name, logos, or watermarks.`
+    const titlePrompt = `Use the provided reference image as the background for a portrait book cover. Preserve its artwork, composition, subjects, and color palette. Use this typography direction: ${variation.typography}. Add a polished, clearly legible title with this exact text: ${JSON.stringify(title)}. Spell it exactly. Add the author name as smaller, clearly legible text below the title with this exact text: ${JSON.stringify(author)}. Spell it exactly. Place both lines where they do not obscure the focal subject. Do not add any other text, logos, or watermarks.`
     const cover = await generateOpenRouterImage({
       apiKey,
       prompt: titlePrompt,
       inputReferences: [background.dataUrl],
     })
-    setWriterCoverCandidate(cover.data, cover.mediaType, 'ai-titled', title)
+    setWriterCoverCandidate(cover.data, cover.mediaType, 'ai-titled', title, author)
     showToast('AI cover preview ready. Keep it or undo to restore the current cover.')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not generate an AI cover.'
@@ -1641,13 +1915,39 @@ async function generateWriterCover() {
   }
 }
 
-function chapterTargetWordCount(chapter) {
-  const existingWordCount = chapter.content.trim().split(/\s+/).filter(Boolean).length
+function chapterTargetWordCount(chapter, content = chapter.content) {
+  const existingWordCount = countWords(content)
   if (existingWordCount) return existingWordCount
   return Math.max(100, Math.ceil(Number($('#page-count').value) * 200 / Math.max(1, state.writer.chapters.length)))
 }
 
-function writerMessages(kind) {
+function splitChapterDraft(text) {
+  const chunks = []
+  let start = 0
+  while (start < text.length) {
+    let end = Math.min(start + chapterDraftChunkCharacterLimit, text.length)
+    if (end < text.length) {
+      const minimumBoundary = start + Math.floor(chapterDraftChunkCharacterLimit * 0.6)
+      const paragraphEnd = text.lastIndexOf('\n\n', end)
+      const sentenceEnd = Math.max(text.lastIndexOf('. ', end), text.lastIndexOf('? ', end), text.lastIndexOf('! ', end))
+      const wordEnd = text.lastIndexOf(' ', end)
+      if (paragraphEnd >= minimumBoundary) end = paragraphEnd + 2
+      else if (sentenceEnd >= minimumBoundary) end = sentenceEnd + 2
+      else if (wordEnd >= minimumBoundary) end = wordEnd + 1
+    }
+    chunks.push(text.slice(start, end))
+    start = end
+  }
+  return chunks
+}
+
+function writerMessages(kind, {
+  existingDraft: requestedDraft,
+  targetWords: requestedTargetWords,
+  chunkIndex,
+  chunkCount,
+  continuity = '',
+} = {}) {
   const topic = $('#book-topic').value.trim()
   const pages = Number($('#page-count').value)
   const system = 'You are a thoughtful, skilled book author. Follow the requested format exactly. Do not add commentary about the task.'
@@ -1655,23 +1955,32 @@ function writerMessages(kind) {
   const outline = state.writer.chapters.map((item, index) => `${index + 1}. ${item.title}`).join('\n')
   const chapterPrompt = kind === 'chapter' ? getCurrentChapterPrompt(chapter).trim() : ''
   const chapterPromptInstruction = chapterPrompt ? `Chapter prompt:\n${chapterPrompt}\n\n` : ''
-  const existingDraft = kind === 'chapter' ? chapter?.content.trim() || '' : ''
-  const draftForPrompt = existingDraft.length > 16000
-    ? `${existingDraft.slice(0, 16000)}\n\n[Draft excerpt truncated to fit the editing context.]`
-    : existingDraft
-  const targetWords = kind === 'chapter' ? chapterTargetWordCount(chapter) : 0
+  const existingDraft = kind === 'chapter'
+    ? typeof requestedDraft === 'string' ? requestedDraft : chapter?.content.trim() || ''
+    : ''
+  const targetWords = kind === 'chapter'
+    ? Number.isSafeInteger(requestedTargetWords) ? requestedTargetWords : chapterTargetWordCount(chapter, existingDraft)
+    : 0
   const priorChapters = state.writer.chapters.slice(0, state.writer.currentChapter)
     .filter((item) => item.content.trim())
     .map((item) => `## ${item.title}\n${item.content}`)
     .join('\n\n').slice(-12000)
+  const continuityContext = continuity
+    ? `Immediately preceding revised prose for continuity:\n${continuity}\n\n`
+    : ''
+  const segmentInstruction = Number.isInteger(chunkCount) && chunkCount > 1
+    ? existingDraft.trim()
+      ? `This is part ${chunkIndex + 1} of ${chunkCount} of the existing chapter. Revise the entire supplied section, preserving its events and details. Do not summarize, omit, or skip any of its content, and keep its length similar. It is only one section of the chapter, so do not add a new introduction or conclusion. `
+      : `Write part ${chunkIndex + 1} of ${chunkCount} of this chapter. Continue smoothly from the preceding prose without repeating it. Do not add a new introduction, and do not conclude the chapter until the final part. `
+    : ''
   const currentSuggestions = parseOutline($('#chapter-outline').value)
   const instruction = kind === 'outline'
     ? `Suggest a coherent sequence of chapters tailored to this book idea, not a generic outline:\n${topic}\n\nAim for about ${pages} reading pages. Return a suggested title as "Title: ..." on the first line, followed by ${Math.min(8, Math.max(2, Math.ceil(pages / 2)))} chapter titles, one per line, numbered. Do not include descriptions or prose.`
     : kind === 'outline-revision'
       ? `Revise these chapter suggestions to follow the request while staying true to the book idea:\n${topic}\n\nCurrent chapter suggestions:\n${currentSuggestions.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\nRequested changes:\n${$('#outline-revision-request').value.trim()}\n\nKeep the existing number of chapters unless the request suggests otherwise. Return only the revised chapter titles, one per line, numbered. Do not include a book title, descriptions, or prose.`
       : existingDraft
-        ? `Revise only the existing prose for Chapter ${state.writer.currentChapter + 1}, "${chapter.title}", applying the chapter prompt while using the book idea and approved chapter plan. Preserve the established characters, plot, setting, and voice unless the prompt explicitly requests a change.\n\nThe book is about:\n${topic}\n\n${chapterPromptInstruction}Approved chapter plan:\n${outline}\n\n${priorChapters ? `Previously written chapters for continuity:\n${priorChapters}\n\n` : ''}Existing chapter draft:\n${draftForPrompt}\n\nTarget about ${targetWords} words unless the chapter prompt requests a different length. Return only the revised prose. Do not repeat the chapter title or add notes.`
-        : `Write only the prose for Chapter ${state.writer.currentChapter + 1}, "${chapter.title}". The book is about:\n${topic}\n\n${chapterPromptInstruction}Approved chapter plan:\n${outline}\n\n${priorChapters ? `Previously written chapters for continuity:\n${priorChapters}\n\n` : ''}Target about ${targetWords} words. Do not repeat the chapter title or add notes.`
+        ? `Revise only the existing prose for Chapter ${state.writer.currentChapter + 1}, "${chapter.title}", applying the chapter prompt while using the book idea and approved chapter plan. Preserve the established characters, plot, setting, and voice unless the prompt explicitly requests a change.\n\nThe book is about:\n${topic}\n\n${chapterPromptInstruction}Approved chapter plan:\n${outline}\n\n${priorChapters ? `Previously written chapters for continuity:\n${priorChapters}\n\n` : ''}${continuityContext}${segmentInstruction}Existing chapter draft:\n${existingDraft}\n\nTarget about ${targetWords} words unless the chapter prompt requests a different length. Return only the revised prose. Do not repeat the chapter title or add notes.`
+        : `Write only the prose for Chapter ${state.writer.currentChapter + 1}, "${chapter.title}". The book is about:\n${topic}\n\n${chapterPromptInstruction}Approved chapter plan:\n${outline}\n\n${priorChapters ? `Previously written chapters for continuity:\n${priorChapters}\n\n` : ''}${continuityContext}${segmentInstruction}Target about ${targetWords} words. Do not repeat the chapter title or add notes.`
   return [
     { role: 'system', content: system },
     { role: 'user', content: instruction },
@@ -1754,12 +2063,28 @@ async function requestChapterDrafts() {
   setWriterBusy(true, 'chapter')
   let written = 0
   let activeChapterDraft = null
+  let notifiedAboutChunking = false
   try {
     for (const chapterIndex of chapterIndexes) {
       state.writer.currentChapter = chapterIndex
       const chapter = state.writer.chapters[chapterIndex]
       const previous = chapter.content
-      activeChapterDraft = { chapterIndex, content: previous }
+      activeChapterDraft = { chapterIndex, content: previous, undoContent: chapter.undoContent }
+      chapter.undoContent = previous
+      const isExistingDraft = Boolean(previous.trim())
+      const draftChunks = isExistingDraft ? splitChapterDraft(previous.trim()) : []
+      const targetWordCount = chapterTargetWordCount(chapter, previous)
+      const targetWordCounts = isExistingDraft
+        ? draftChunks.map((draftChunk) => countWords(draftChunk))
+        : Array.from(
+          { length: Math.ceil(targetWordCount / chapterDraftChunkWordLimit) },
+          (_, index) => Math.min(chapterDraftChunkWordLimit, targetWordCount - index * chapterDraftChunkWordLimit),
+        )
+      const chunkCount = isExistingDraft ? draftChunks.length : targetWordCounts.length
+      if (chunkCount > 1 && !notifiedAboutChunking) {
+        showToast(`Long chapter work is split across ${chunkCount} AI requests. Provider charges may apply.`)
+        notifiedAboutChunking = true
+      }
       editor.value = previous
       $('#chapter-prompt').value = getCurrentChapterPrompt(chapter)
       $('#chapter-position').textContent = `Chapter ${chapterIndex + 1} of ${state.writer.chapters.length}`
@@ -1768,22 +2093,35 @@ async function requestChapterDrafts() {
       setWriterStatus(autoFill
         ? `Writing chapter ${chapterIndex + 1} of ${state.writer.chapters.length}...`
         : 'Finding the first line...')
-      const chapterWordCount = chapterTargetWordCount(chapter)
-      const result = await streamOpenRouter({
-        apiKey,
-        model,
-        messages: writerMessages('chapter'),
-        maxTokens: Math.min(10000, Math.max(700, chapterWordCount * 2)),
-        onUpdate: (text) => {
-          chapter.content = text
-          editor.value = text
-          updateWriterControls()
-          scheduleWriterAutosave()
-        },
-      })
-      chapter.content = result
+      const revisedSegments = []
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        const existingDraft = isExistingDraft ? draftChunks[chunkIndex] : ''
+        const segmentWordCount = targetWordCounts[chunkIndex]
+        const result = await streamOpenRouter({
+          apiKey,
+          model,
+          messages: writerMessages('chapter', {
+            existingDraft,
+            targetWords: segmentWordCount,
+            chunkIndex,
+            chunkCount,
+            continuity: revisedSegments.join('\n\n').slice(-3000),
+          }),
+          maxTokens: Math.min(10000, Math.max(700, segmentWordCount * 2)),
+          onUpdate: (text) => {
+            chapter.content = [...revisedSegments, text].join('\n\n')
+            editor.value = chapter.content
+            updateWriterControls()
+            scheduleWriterAutosave()
+          },
+        })
+        revisedSegments.push(result)
+        chapter.content = revisedSegments.join('\n\n')
+        editor.value = chapter.content
+        updateWriterControls()
+        scheduleWriterAutosave()
+      }
       activeChapterDraft = null
-      editor.value = result
       written += 1
       renderCurrentChapter()
     }
@@ -1791,7 +2129,11 @@ async function requestChapterDrafts() {
       ? `Auto fill complete. Wrote ${written} chapter${written === 1 ? '' : 's'}${skipped ? ` and left ${skipped} existing chapter${skipped === 1 ? '' : 's'} unchanged` : ''}.`
       : 'Chapter ready. Review it or move to the next chapter.')
   } catch (error) {
-    if (activeChapterDraft) state.writer.chapters[activeChapterDraft.chapterIndex].content = activeChapterDraft.content
+    if (activeChapterDraft) {
+      const chapter = state.writer.chapters[activeChapterDraft.chapterIndex]
+      chapter.content = activeChapterDraft.content
+      chapter.undoContent = activeChapterDraft.undoContent ?? null
+    }
     if (state.writer.chapters[state.writer.currentChapter]) renderCurrentChapter()
     else editor.value = ''
     setWriterStatus(error.message || 'The chapter could not be generated.', 'error')
@@ -1849,79 +2191,104 @@ async function reviseOutline() {
   }
 }
 
-async function saveDraft() {
-  clearTimeout(writerAutosaveTimer)
-  writerAutosaveTimer = null
-  await Promise.all([...writerAutosaveTasks].map((task) => task.catch(() => {})))
-  const title = $('#book-title').value.trim()
-  const manuscript = `# ${title}\n\n${state.writer.chapters
-    .filter((chapter) => chapter.content.trim())
-    .map((chapter) => `## ${chapter.title}\n\n${chapter.content.trim()}`)
-    .join('\n\n')}`
-  if (!title || !manuscript) return
+async function saveWriterBook({ copy = false } = {}) {
+  if (writerSaveInProgress || state.writer.busy) return
+  writerSaveInProgress = true
+  setWriterBusy(true, 'save')
+  try {
+    clearTimeout(writerAutosaveTimer)
+    writerAutosaveTimer = null
+    await Promise.all([...writerAutosaveTasks])
+    const title = $('#book-title').value.trim()
+    const chapters = state.writer.chapters
+      .filter((chapter) => chapter.content.trim())
+      .map((chapter) => ({ title: chapter.title, content: chapter.content }))
+    if (!title || !chapters.length) return
 
-  if (state.writer.cover?.source === 'ai-titled' && state.writer.cover.generatedTitle !== title) {
-    throw new Error('The AI cover title no longer matches the book title. Regenerate the cover before saving.')
-  }
-  const authorField = $('#book-author')
-  const author = authorField.value.trim() || (state.writer.loadedBookId ? 'Leaf reader' : randomAiAuthorAlias())
-  if (!authorField.value.trim()) authorField.value = author
-  const id = state.writer.savedBookId || createUuid()
-  const existing = state.books.find((book) => book.id === id)
-  const cover = await createTitledCover(state.writer.cover, title)
-  const data = createEpub({ title, author, manuscript, cover })
-  const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'leaf-book'}.epub`
-  const record = {
-    id,
-    title,
-    author,
-    fileName,
-    data,
-    addedAt: existing?.addedAt || Date.now(),
-    source: 'ai',
-    ...(state.writer.cover?.source === 'ai' || state.writer.cover?.source === 'ai-titled'
-      ? {
-        coverOriginal: {
-          data: state.writer.cover.data,
-          mediaType: state.writer.cover.mediaType,
-          ...(state.writer.cover.source === 'ai-titled' ? { generatedTitle: state.writer.cover.generatedTitle } : {}),
-        },
-      }
-      : {}),
-  }
-  await storeRequest('books', 'readwrite', (store) => store.put(record))
-  if (existing) {
-    await storeRequest('progress', 'readwrite', (store) => store.delete(id))
-    state.progress = state.progress.filter((item) => item.id !== id)
-    state.books = state.books.map((book) => book.id === id ? record : book)
-  } else {
-    state.books.push(record)
-  }
-  state.writer.savedBookId = id
-  state.writer.wizardStep = 1
-  let autosavedDraftRemoved = true
-  if (state.writer.draftId) {
-    const draftId = state.writer.draftId
-    try {
-      await storeRequest('drafts', 'readwrite', (store) => store.delete(draftId))
-      state.drafts = state.drafts.filter((draft) => draft.id !== draftId)
-      state.writer.draftId = null
-    } catch (error) {
-      autosavedDraftRemoved = false
-      console.error('The book was saved, but its unfinished draft could not be removed.', error)
-      try {
-        await persistWriterDraft()
-      } catch (draftError) {
-        console.error('Could not update the unfinished draft after saving the book.', draftError)
+    const authorField = $('#book-author')
+    const author = authorField.value.trim()
+      || (state.writer.cover?.source === 'ai-titled' ? state.writer.cover.generatedAuthor : '')
+      || (state.writer.loadedBookId ? 'Leaf reader' : randomAiAuthorAlias())
+    if (!authorField.value.trim()) authorField.value = author
+    if (state.writer.cover?.source === 'ai-titled'
+      && (state.writer.cover.generatedTitle !== title
+        || (typeof state.writer.cover.generatedAuthor === 'string' && state.writer.cover.generatedAuthor !== author))) {
+      throw new Error('The AI cover title or author no longer matches the book details. Regenerate the cover before saving.')
+    }
+    const id = copy ? createUuid() : state.writer.savedBookId || state.writer.loadedBookId || createUuid()
+    const existing = state.books.find((book) => book.id === id)
+    const replacingLoadedBook = !copy && id === state.writer.loadedBookId
+    const cover = await createTitledCover(state.writer.cover, title, author)
+    const data = createEpub({ title, author, chapters, cover })
+    const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'leaf-book'}.epub`
+    const record = {
+      id,
+      title,
+      author,
+      fileName,
+      data,
+      addedAt: existing?.addedAt || Date.now(),
+      source: 'ai',
+      ...(state.writer.cover?.source === 'ai' || state.writer.cover?.source === 'ai-background' || state.writer.cover?.source === 'ai-titled'
+        ? {
+          coverOriginal: {
+            data: state.writer.cover.data,
+            mediaType: state.writer.cover.mediaType,
+            ...(state.writer.cover.source === 'ai-titled'
+              ? {
+                generatedTitle: state.writer.cover.generatedTitle,
+                generatedAuthor: state.writer.cover.generatedAuthor,
+              }
+              : {}),
+          },
+        }
+        : {}),
+    }
+    const draftIdsToRemove = new Set(state.writer.draftId ? [state.writer.draftId] : [])
+    for (const draft of state.drafts) {
+      if (draft.writer?.savedBookId === id
+        || (replacingLoadedBook && draft.writer?.loadedBookId === state.writer.loadedBookId)) {
+        draftIdsToRemove.add(draft.id)
       }
     }
+    await storeTransaction(['books', 'drafts', 'progress'], 'readwrite', (transaction) => {
+      transaction.objectStore('books').put(record)
+      if (existing) transaction.objectStore('progress').delete(id)
+      for (const draftId of draftIdsToRemove) transaction.objectStore('drafts').delete(draftId)
+    })
+    if (existing) {
+      state.progress = state.progress.filter((item) => item.id !== id)
+      state.books = state.books.map((book) => book.id === id ? record : book)
+    } else {
+      state.books.push(record)
+    }
+    state.drafts = state.drafts.filter((draft) => !draftIdsToRemove.has(draft.id))
+    state.writer.draftId = null
+    state.writer.savedBookId = id
+    state.writer.wizardStep = 1
+    renderWriterLibraryOptions()
+    updateWriterControls()
+    renderLibrary()
+    setWriterStatus(copy
+      ? 'A copy is saved to your library. Keep revising here to update the copy.'
+      : existing ? 'The saved book has been replaced. Keep revising here to update it.' : 'Saved to your library. Keep revising here to update this book.')
+    showToast(copy
+      ? 'A copy of your book is on the shelf.'
+      : existing ? 'Your saved book has been replaced.' : 'Your book is on the shelf.')
+  } finally {
+    writerSaveInProgress = false
+    setWriterBusy(false)
   }
-  updateWriterControls()
-  renderLibrary()
-  setWriterStatus('Saved to your library. Keep revising here to update this book.')
-  showToast(autosavedDraftRemoved
-    ? existing ? 'Your saved book has been updated.' : 'Your book is on the shelf.'
-    : 'Book saved, but its unfinished draft could not be cleared.')
+}
+
+async function handleWriterBookSave(copy) {
+  try {
+    await saveWriterBook({ copy })
+    showLibrary({ flushDraft: false })
+  } catch (error) {
+    setWriterStatus(error.message || 'The book could not be saved.', 'error')
+    scheduleWriterAutosave()
+  }
 }
 
 async function importFile(file) {
@@ -2572,6 +2939,11 @@ function readerThemeBackgroundImage(colors, aiBackgroundUrl, aiBackgroundOpacity
   return colors.backgroundImage ? `url("${colors.backgroundImage}")` : 'none'
 }
 
+function readerThemeColors(themeName, aiBackgroundMode) {
+  const theme = readerThemes[themeName]
+  return theme.aiStory ? { ...theme, ...aiStoryThemeModes[aiBackgroundMode] } : theme
+}
+
 function setReaderSettingsOpen(open) {
   $('#reader-settings').hidden = !open
   $('#reader-settings-button').setAttribute('aria-expanded', String(open))
@@ -2586,7 +2958,7 @@ function setReaderSettingsOpen(open) {
 
 function applyReaderTheme() {
   const preferences = state.readerPreferences
-  const colors = readerThemes[preferences.theme]
+  const colors = readerThemeColors(preferences.theme, preferences.aiBackgroundMode)
   const aiBackgroundUrl = colors.aiStory ? state.active?.aiBackgroundUrl : null
   const backgroundImage = readerThemeBackgroundImage(colors, aiBackgroundUrl, preferences.aiBackgroundOpacity)
   const backgroundSize = aiBackgroundUrl ? '100% 100%, cover' : colors.backgroundImage ? '320px 360px' : colors.backgroundGradient ? '100% 100%' : 'auto'
@@ -2597,8 +2969,12 @@ function applyReaderTheme() {
   $('#reader-ai-background-opacity').value = preferences.aiBackgroundOpacity
   $('#reader-ai-background-opacity-value').textContent = `${preferences.aiBackgroundOpacity}%`
   $('#reader-ai-background-opacity-setting').hidden = !colors.aiStory
+  $('#reader-ai-background-mode').value = preferences.aiBackgroundMode
+  $('#reader-ai-background-mode-setting').hidden = !colors.aiStory
   $('#reader-font-family').value = preferences.font
-  $('#reader-line-height').value = String(preferences.lineHeight)
+  document.querySelectorAll('[data-reader-line-height]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.readerLineHeight) === preferences.lineHeight))
+  })
   const preview = $('#reader-font-preview')
   const previewText = $('#reader-font-preview-text')
   preview.style.setProperty('--reader-preview-background', colors.background)
@@ -2612,7 +2988,10 @@ function applyReaderTheme() {
   document.querySelectorAll('[data-reader-theme]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.readerTheme === preferences.theme))
     const theme = readerThemes[button.dataset.readerTheme]
+    const themeColors = readerThemeColors(button.dataset.readerTheme, preferences.aiBackgroundMode)
     const themeImage = theme.aiStory ? state.active?.aiBackgroundUrl : theme.backgroundImage
+    button.style.setProperty('--reader-theme-background', themeColors.background)
+    button.style.setProperty('--reader-theme-color', themeColors.color)
     button.style.setProperty('--reader-theme-image', themeImage
       ? `url("${themeImage}")`
       : theme.aiStory
@@ -2641,7 +3020,7 @@ function applyReaderTheme() {
 }
 
 function applyRenditionReaderTheme(rendition, preferences) {
-  const colors = readerThemes[preferences.theme]
+  const colors = readerThemeColors(preferences.theme, preferences.aiBackgroundMode)
   rendition.themes.default({
     html: {
       'background-color': 'transparent !important',
@@ -2722,17 +3101,14 @@ $('#delete-writer-draft').addEventListener('click', () => deleteSelectedWriterDr
 $('#wizard-back').addEventListener('click', returnToPreviousWriterStep)
 $('#wizard-next').addEventListener('click', continueWriterWorkflow)
 $('#revise-outline').addEventListener('click', () => reviseOutline())
-$('#generate-chapter').addEventListener('click', () => requestDraft('chapter'))
-$('#remove-chapter').addEventListener('click', removeCurrentChapter)
-$('#save-draft').addEventListener('click', async () => {
-  try {
-    await saveDraft()
-    showLibrary({ flushDraft: false })
-  } catch (error) {
-    setWriterStatus(error.message || 'The book could not be saved.', 'error')
-    scheduleWriterAutosave()
-  }
+$('#generate-chapter').addEventListener('click', () => {
+  const chapter = state.writer.chapters[state.writer.currentChapter]
+  if (typeof chapter?.undoContent === 'string') undoGeneratedChapter()
+  else requestDraft('chapter')
 })
+$('#remove-chapter').addEventListener('click', removeCurrentChapter)
+$('#copy-draft').addEventListener('click', () => handleWriterBookSave(true))
+$('#save-draft').addEventListener('click', () => handleWriterBookSave(false))
 $('#toggle-key').addEventListener('click', (event) => {
   const input = $('#openrouter-key')
   const visible = input.type === 'password'
@@ -2742,16 +3118,7 @@ $('#toggle-key').addEventListener('click', (event) => {
   event.currentTarget.innerHTML = `<i data-lucide="${visible ? 'eye-off' : 'eye'}"></i>`
   icons()
 })
-try {
-  const savedKey = localStorage.getItem(openRouterKeyStorageKey)
-  if (savedKey) {
-    $('#openrouter-key').value = savedKey
-    setWriterStatus('Saved API key loaded from this browser.')
-  }
-} catch (error) {
-  console.error('Could not load the OpenRouter API key from local storage.', error)
-  setWriterStatus('Could not access browser storage for your API key. Enter it again to continue.', 'error')
-}
+restoreOpenRouterApiKey()
 try {
   const savedModel = localStorage.getItem(openRouterModelStorageKey)
   const modelExists = [...$('#openrouter-model').options].some((option) => option.value === savedModel)
@@ -2762,17 +3129,13 @@ try {
   setWriterStatus('Could not restore the saved AI model in this browser.', 'error')
 }
 $('#openrouter-key').addEventListener('input', () => {
-  try {
-    const key = $('#openrouter-key').value.trim()
-    if (key) localStorage.setItem(openRouterKeyStorageKey, key)
-    else localStorage.removeItem(openRouterKeyStorageKey)
-    setWriterStatus(key ? 'API key saved in this browser.' : 'Saved API key removed from this browser.')
-  } catch (error) {
-    console.error('Could not save the OpenRouter API key to local storage.', error)
-    setWriterStatus('Could not save the API key in this browser.', 'error')
-  }
+  persistOpenRouterApiKey(true)
   updateWriterControls()
 })
+$('#openrouter-key').addEventListener('change', persistOpenRouterApiKey)
+$('#openrouter-key').addEventListener('blur', persistOpenRouterApiKey)
+$('#openrouter-key').addEventListener('focus', restoreOpenRouterApiKey)
+window.addEventListener('pagehide', persistOpenRouterApiKey)
 const refreshWriterPrompt = () => {
   if (state.writer.outline.length) {
     const matches = state.writer.outlinePrompt === outlinePromptSignature()
@@ -2832,7 +3195,11 @@ $('#book-title').addEventListener('input', () => {
   updateCoverTitleOverlay()
   scheduleWriterAutosave()
 })
-$('#book-author').addEventListener('input', scheduleWriterAutosave)
+$('#book-author').addEventListener('input', () => {
+  updateWriterControls()
+  updateCoverTitleOverlay()
+  scheduleWriterAutosave()
+})
 $('#auto-fill-chapters').addEventListener('change', scheduleWriterAutosave)
 $('#cover-art-style').addEventListener('change', scheduleWriterAutosave)
 $('#cover-mood').addEventListener('change', scheduleWriterAutosave)
@@ -2989,8 +3356,12 @@ $('#reset-reader-settings').addEventListener('click', () => {
 })
 $('#reader-font-size').addEventListener('input', (event) => setReaderPreference('fontSize', Number(event.target.value)))
 $('#reader-ai-background-opacity').addEventListener('input', (event) => setReaderPreference('aiBackgroundOpacity', Number(event.target.value)))
+$('#reader-ai-background-mode').addEventListener('change', (event) => setReaderPreference('aiBackgroundMode', event.target.value))
 $('#reader-font-family').addEventListener('change', (event) => setReaderPreference('font', event.target.value))
-$('#reader-line-height').addEventListener('change', (event) => setReaderPreference('lineHeight', Number(event.target.value)))
+$('#reader-line-spacing-options').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-reader-line-height]')
+  if (button) setReaderPreference('lineHeight', Number(button.dataset.readerLineHeight))
+})
 $('#reader-settings').addEventListener('click', (event) => {
   const theme = event.target.closest('[data-reader-theme]')
   if (theme) setReaderPreference('theme', theme.dataset.readerTheme)

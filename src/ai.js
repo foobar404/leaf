@@ -22,6 +22,7 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
   let buffer = ''
   let manuscript = ''
   let complete = false
+  let finishReason = ''
 
   const readLine = (line) => {
     const trimmed = line.trim()
@@ -36,7 +37,9 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
     } catch {
       return false
     }
-    const text = event.choices?.[0]?.delta?.content
+    const choice = event.choices?.[0]
+    if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+    const text = choice?.delta?.content
     if (typeof text === 'string') {
       manuscript += text
       onUpdate(manuscript)
@@ -65,6 +68,9 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
     reader.releaseLock()
   }
 
+  if (finishReason === 'length' || finishReason === 'max_tokens') {
+    throw new Error('The selected model stopped at its output limit before completing this text. Try a model with a larger output limit.')
+  }
   if (!manuscript.trim()) throw new Error('The selected model returned an empty draft.')
   return manuscript.trim()
 }
