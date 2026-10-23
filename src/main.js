@@ -10,11 +10,14 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Eye,
   EyeOff,
   Gauge,
   Headphones,
+  Highlighter,
+  Languages,
   Library,
   ListPlus,
   Pause,
@@ -26,6 +29,7 @@ import {
   SkipBack,
   SkipForward,
   Sparkles,
+  Square,
   SlidersHorizontal,
   Trash2,
   X,
@@ -45,11 +49,14 @@ const iconSet = {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Eye,
   EyeOff,
   Gauge,
   Headphones,
+  Highlighter,
+  Languages,
   Library,
   ListPlus,
   Pause,
@@ -61,6 +68,7 @@ const iconSet = {
   SkipBack,
   SkipForward,
   Sparkles,
+  Square,
   SlidersHorizontal,
   Trash2,
   X,
@@ -70,6 +78,7 @@ const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.7
 const aiStoryReaderTheme = 'ai-story-background'
 const chapterDraftChunkCharacterLimit = 8000
 const chapterDraftChunkWordLimit = 1000
+const chapterPriorContextCharacterLimit = 3000
 const aiStoryThemeModes = {
   light: { background: '#F4EBD9', color: '#342D22' },
   dark: { background: '#1E2024', color: '#E9E6DF', dark: true },
@@ -326,6 +335,7 @@ function createWriterState() {
     chapters: [],
     currentChapter: 0,
     chapterPromptScope: 'current',
+    chapterGenerationController: null,
     allChapterPrompt: '',
     suggestedTitle: '',
     cover: null,
@@ -340,6 +350,7 @@ const state = {
   drafts: [],
   progress: [],
   bookmarks: [],
+  highlights: [],
   active: null,
   readerPreferences: loadReaderPreferences(),
   audiobookVoiceURI: '',
@@ -471,6 +482,7 @@ app.innerHTML = `
                   <button class="icon-button" type="button" id="chapter-next" aria-label="Next chapter" title="Next chapter"><i data-lucide="chevron-right"></i></button>
                   <div class="chapter-navigation__actions">
                     <button class="button button--primary" type="button" id="generate-chapter"><i data-lucide="sparkles"></i><span>Generate chapter</span></button>
+                    <button class="button button--outline" type="button" id="stop-chapter-generation" hidden><i data-lucide="square"></i><span>Stop generation</span></button>
                     <button class="icon-button chapter-undo-button" type="button" id="undo-chapter" aria-label="Undo the last generation for this chapter" title="Undo the last generation for this chapter" hidden><i data-lucide="rotate-ccw"></i></button>
                     <button class="icon-button chapter-remove-button" type="button" id="remove-chapter" aria-label="Remove current chapter" title="Remove current chapter"><i data-lucide="trash-2"></i></button>
                   </div>
@@ -684,11 +696,21 @@ app.innerHTML = `
           <div class="reader-main">
             <div class="reader-stage">
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
-              <button class="reader-tap-zone reader-tap-zone--prev" type="button" id="reader-prev-zone" aria-label="Previous page"></button>
-              <button class="reader-tap-zone reader-tap-zone--next" type="button" id="reader-next-zone" aria-label="Next page"></button>
             </div>
             <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label">A quiet moment</span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
           </div>
+        </div>
+        <div class="reader-selection-menu" id="reader-selection-menu" role="dialog" aria-label="Selected text actions" aria-busy="false" hidden>
+          <p class="reader-selection-menu__quote" id="reader-selection-quote"></p>
+          <ul class="reader-selection-menu__actions" aria-label="Selected text actions">
+            <li><button type="button" data-reader-selection-action="copy"><i data-lucide="copy"></i><span>Copy</span></button></li>
+            <li><button type="button" id="reader-selection-highlight" data-reader-selection-action="highlight"><i data-lucide="highlighter"></i><span>Highlight</span></button></li>
+            <li><button type="button" data-reader-selection-action="definition"><i data-lucide="book-open"></i><span>Definition</span></button></li>
+            <li><button type="button" data-reader-selection-action="translation"><i data-lucide="languages"></i><span>Translate</span></button></li>
+            <li><button type="button" data-reader-selection-action="close"><i data-lucide="x"></i><span>Close</span></button></li>
+          </ul>
+          <p class="reader-selection-menu__result" id="reader-selection-result" role="status" aria-live="polite" hidden></p>
+          <p class="reader-selection-menu__attribution" id="reader-selection-attribution" hidden></p>
         </div>
       </section>
     </main>
@@ -736,13 +758,14 @@ icons()
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('leaf-library', 3)
+    const request = indexedDB.open('leaf-library', 4)
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('bookmarks')) db.createObjectStore('bookmarks', { keyPath: 'id' })
+      if (!db.objectStoreNames.contains('highlights')) db.createObjectStore('highlights', { keyPath: 'id' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -778,11 +801,12 @@ async function storeTransaction(storeNames, mode, action) {
 
 async function loadLibrary() {
   try {
-    ;[state.books, state.drafts, state.progress, state.bookmarks] = await Promise.all([
+    ;[state.books, state.drafts, state.progress, state.bookmarks, state.highlights] = await Promise.all([
       storeRequest('books', 'readonly', (store) => store.getAll()),
       storeRequest('drafts', 'readonly', (store) => store.getAll()),
       storeRequest('progress', 'readonly', (store) => store.getAll()),
       storeRequest('bookmarks', 'readonly', (store) => store.getAll()),
+      storeRequest('highlights', 'readonly', (store) => store.getAll()),
     ])
     renderLibrary()
   } catch (error) {
@@ -1133,7 +1157,13 @@ function updateWriterControls() {
     ? `Chapter ${state.writer.currentChapter + 1}: ${currentChapterWords.toLocaleString()} words · Total: ${words.toLocaleString()} words`
     : state.writer.outline.length ? `${state.writer.outline.length} AI-suggested chapters` : 'Your book idea will guide the chapter suggestions.'
   $('#revise-outline').disabled = busy || !$('#outline-revision-request').value.trim() || !parseOutline($('#chapter-outline').value).length
+  const stopChapterGeneration = busy && Boolean(state.writer.chapterGenerationController)
+  $('#generate-chapter').hidden = stopChapterGeneration
   $('#generate-chapter').disabled = busy || state.writer.stage !== 'chapters' || !activeChapter
+  const stopButton = $('#stop-chapter-generation')
+  stopButton.hidden = !stopChapterGeneration
+  stopButton.disabled = Boolean(state.writer.chapterGenerationController?.signal.aborted)
+  stopButton.querySelector('span').textContent = stopButton.disabled ? 'Stopping...' : 'Stop generation'
   updateChapterActionButton(activeChapter)
   $('#chapter-previous').disabled = busy || state.writer.currentChapter === 0
   $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !activeChapter?.content.trim()
@@ -2026,10 +2056,10 @@ function writerMessages(kind, {
   const targetWords = kind === 'chapter'
     ? Number.isSafeInteger(requestedTargetWords) ? requestedTargetWords : chapterTargetWordCount(chapter, existingDraft)
     : 0
-  const priorChapters = state.writer.chapters.slice(0, state.writer.currentChapter)
+  const priorChapters = existingDraft ? '' : state.writer.chapters.slice(0, state.writer.currentChapter)
     .filter((item) => item.content.trim())
     .map((item) => `## ${item.title}\n${item.content}`)
-    .join('\n\n').slice(-12000)
+    .join('\n\n').slice(-chapterPriorContextCharacterLimit)
   const continuityContext = continuity
     ? `Immediately preceding revised prose for continuity:\n${continuity}\n\n`
     : ''
@@ -2124,12 +2154,15 @@ async function requestChapterDrafts() {
   }
   if (!chapterIndexes.length || !state.writer.chapters[startIndex]) return
 
+  const chapterGenerationController = new AbortController()
+  state.writer.chapterGenerationController = chapterGenerationController
   setWriterBusy(true, 'chapter')
   let written = 0
   let activeChapterDraft = null
   let notifiedAboutChunking = false
   try {
     for (const chapterIndex of chapterIndexes) {
+      if (chapterGenerationController?.signal.aborted) break
       state.writer.currentChapter = chapterIndex
       const chapter = state.writer.chapters[chapterIndex]
       const previous = chapter.content
@@ -2160,6 +2193,7 @@ async function requestChapterDrafts() {
         : 'Finding the first line...')
       const revisedSegments = []
       for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        if (chapterGenerationController?.signal.aborted) break
         const existingDraft = isExistingDraft ? draftChunks[chunkIndex] : ''
         const segmentWordCount = targetWordCounts[chunkIndex]
         const result = await streamOpenRouter({
@@ -2173,6 +2207,8 @@ async function requestChapterDrafts() {
             continuity: revisedSegments.join('\n\n').slice(-3000),
           }),
           maxTokens: Math.min(10000, Math.max(700, segmentWordCount * 2)),
+          continueOnLength: true,
+          signal: chapterGenerationController?.signal,
           onUpdate: (text) => {
             chapter.content = [...revisedSegments, text].join('\n\n')
             editor.value = chapter.content
@@ -2188,26 +2224,48 @@ async function requestChapterDrafts() {
         updateWriterControls()
         scheduleWriterAutosave()
       }
+      if (chapterGenerationController?.signal.aborted) break
       activeChapterDraft = null
       written += 1
       renderCurrentChapter()
       scrollManuscriptToBottom(editor)
     }
-    setWriterStatus(generateAllChapters
-      ? `Finished generating or updating ${written} chapter${written === 1 ? '' : 's'}.`
-      : 'Chapter ready. Review it or move to the next chapter.')
+    if (chapterGenerationController?.signal.aborted) {
+      const message = 'Chapter generation stopped. Completed chapters and current partial text were kept.'
+      setWriterStatus(message)
+      showToast(message)
+    } else {
+      setWriterStatus(generateAllChapters
+        ? `Finished generating or updating ${written} chapter${written === 1 ? '' : 's'}.`
+        : 'Chapter ready. Review it or move to the next chapter.')
+    }
   } catch (error) {
-    if (activeChapterDraft) {
+    const stopped = Boolean(chapterGenerationController?.signal.aborted)
+    if (activeChapterDraft && !stopped) {
       const chapter = state.writer.chapters[activeChapterDraft.chapterIndex]
       chapter.content = activeChapterDraft.content
       chapter.undoContent = activeChapterDraft.undoContent ?? null
     }
     if (state.writer.chapters[state.writer.currentChapter]) renderCurrentChapter()
     else editor.value = ''
-    setWriterStatus(error.message || 'The chapter could not be generated.', 'error')
+    if (stopped) {
+      const message = 'Chapter generation stopped. Completed chapters and current partial text were kept.'
+      setWriterStatus(message)
+      showToast(message)
+    } else {
+      setWriterStatus(error.message || 'The chapter could not be generated.', 'error')
+    }
   } finally {
+    state.writer.chapterGenerationController = null
     setWriterBusy(false)
   }
+}
+
+function stopChapterGeneration() {
+  const controller = state.writer.chapterGenerationController
+  if (!controller || controller.signal.aborted) return
+  controller.abort()
+  updateWriterControls()
 }
 
 async function reviseOutline() {
@@ -2374,15 +2432,376 @@ async function importFile(file) {
   }
 }
 
+function closeReaderSelectionMenu(active = state.active) {
+  const menu = $('#reader-selection-menu')
+  if (active?.selectionLookupController) {
+    active.selectionLookupController.abort()
+    active.selectionLookupController = null
+  }
+  if (active) {
+    active.selection = null
+    active.selectionMenuToken = (active.selectionMenuToken || 0) + 1
+  }
+  menu.hidden = true
+  menu.setAttribute('aria-busy', 'false')
+  $('#reader-selection-result').hidden = true
+  $('#reader-selection-result').textContent = ''
+  $('#reader-selection-attribution').hidden = true
+  $('#reader-selection-attribution').replaceChildren()
+}
+
+function positionReaderSelectionMenu(active, selection) {
+  const menu = $('#reader-selection-menu')
+  const screen = $('#reader-screen')
+  menu.hidden = false
+  menu.style.visibility = 'hidden'
+  requestAnimationFrame(() => {
+    if (state.active !== active || active.selection !== selection || menu.hidden) return
+    const screenBounds = screen.getBoundingClientRect()
+    const frameBounds = selection.frame.getBoundingClientRect()
+    const scaleX = selection.frame.clientWidth ? frameBounds.width / selection.frame.clientWidth : 1
+    const scaleY = selection.frame.clientHeight ? frameBounds.height / selection.frame.clientHeight : 1
+    const anchorLeft = frameBounds.left + selection.rect.left * scaleX
+    const anchorTop = frameBounds.top + selection.rect.top * scaleY
+    const anchorBottom = frameBounds.top + selection.rect.bottom * scaleY
+    const menuBounds = menu.getBoundingClientRect()
+    const margin = 12
+    const left = Math.max(margin, Math.min(
+      anchorLeft + selection.rect.width * scaleX / 2 - screenBounds.left - menuBounds.width / 2,
+      screen.clientWidth - menuBounds.width - margin,
+    ))
+    let top = anchorTop - screenBounds.top - menuBounds.height - margin
+    if (top < margin) top = anchorBottom - screenBounds.top + margin
+    top = Math.max(margin, Math.min(top, screen.clientHeight - menuBounds.height - margin))
+    menu.style.left = `${left}px`
+    menu.style.top = `${top}px`
+    menu.style.visibility = ''
+  })
+}
+
+function showReaderSelectionMenu(active, cfiRange, contents) {
+  const selection = contents.document.getSelection()
+  const frame = contents.document.defaultView?.frameElement
+  if (!selection || selection.isCollapsed || !frame) return
+  const text = selection.toString().trim()
+  if (!text) return
+  const range = selection.getRangeAt(0)
+  const nextSelection = {
+    cfiRange,
+    text,
+    frame,
+    rect: range.getBoundingClientRect(),
+    token: (active.selectionMenuToken || 0) + 1,
+  }
+  active.selectionLookupController?.abort()
+  active.selectionLookupController = null
+  active.selectionMenuToken = nextSelection.token
+  active.selection = nextSelection
+  $('#reader-selection-quote').textContent = text.length > 240 ? `${text.slice(0, 237)}…` : text
+  const isHighlighted = state.highlights.some((highlight) => (
+    highlight.bookId === active.record.id && highlight.cfiRange === cfiRange
+  ))
+  $('#reader-selection-highlight').querySelector('span').textContent = isHighlighted ? 'Remove highlight' : 'Highlight'
+  $('#reader-selection-result').hidden = true
+  $('#reader-selection-result').textContent = ''
+  $('#reader-selection-attribution').hidden = true
+  $('#reader-selection-attribution').replaceChildren()
+  $('#reader-selection-menu').setAttribute('aria-busy', 'false')
+  $('#reader-selection-menu').querySelectorAll('button').forEach((button) => {
+    button.disabled = false
+  })
+  positionReaderSelectionMenu(active, nextSelection)
+}
+
+async function copyReaderSelection() {
+  const text = state.active?.selection?.text
+  if (!text) return
+  let copied = false
+  let clipboardError
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      copied = true
+    }
+  } catch (error) {
+    clipboardError = error
+  }
+  if (!copied) {
+    const fallback = document.createElement('textarea')
+    fallback.value = text
+    fallback.setAttribute('readonly', '')
+    fallback.style.position = 'fixed'
+    fallback.style.opacity = '0'
+    try {
+      document.body.append(fallback)
+      fallback.select()
+      copied = document.execCommand('copy')
+    } catch (error) {
+      clipboardError = error
+    }
+    fallback.remove()
+  }
+  if (!copied) {
+    console.error('Could not copy selected book text.', clipboardError)
+    showToast('Could not copy the selected text.')
+    return
+  }
+  closeReaderSelectionMenu()
+  showToast('Selected text copied.')
+}
+
+async function toggleReaderSelectionHighlight() {
+  const active = state.active
+  const selection = active?.selection
+  if (!active || !selection) return
+  const highlight = state.highlights.find((item) => (
+    item.bookId === active.record.id && item.cfiRange === selection.cfiRange
+  ))
+  const button = $('#reader-selection-highlight')
+  button.disabled = true
+  try {
+    if (highlight) {
+      await storeRequest('highlights', 'readwrite', (store) => store.delete(highlight.id))
+      state.highlights = state.highlights.filter((item) => item.id !== highlight.id)
+      active.rendition.annotations.remove(highlight.cfiRange, 'highlight')
+      button.querySelector('span').textContent = 'Highlight'
+      showToast('Highlight removed.')
+    } else {
+      const newHighlight = {
+        id: createUuid(),
+        bookId: active.record.id,
+        cfiRange: selection.cfiRange,
+        text: selection.text,
+        createdAt: Date.now(),
+      }
+      await storeRequest('highlights', 'readwrite', (store) => store.add(newHighlight))
+      state.highlights.push(newHighlight)
+      active.rendition.annotations.highlight(
+        newHighlight.cfiRange,
+        { text: newHighlight.text },
+        undefined,
+        'leaf-reader-highlight',
+        { fill: '#f4d78f', 'fill-opacity': '0.42' },
+      )
+      button.querySelector('span').textContent = 'Remove highlight'
+      showToast('Highlight saved.')
+    }
+  } catch (error) {
+    console.error('Could not save the reader highlight.', error)
+    showToast('Could not save the highlight.')
+  } finally {
+    button.disabled = false
+  }
+}
+
+function selectedEnglishDictionaryWord(text) {
+  const word = text.trim().replace(/^[^\p{L}\p{N}\p{M}]+|[^\p{L}\p{N}\p{M}]+$/gu, '')
+  return word && !/\s/u.test(word) && /^[\p{L}\p{N}\p{M}]+(?:['’\-][\p{L}\p{N}\p{M}]+)*$/u.test(word)
+    ? word
+    : null
+}
+
+async function fetchDictionaryDefinition(word, signal) {
+  let response
+  try {
+    response = await fetch(
+      `https://freedictionaryapi.com/api/v1/entries/en/${encodeURIComponent(word)}`,
+      { signal },
+    )
+  } catch (error) {
+    if (signal.aborted) throw error
+    throw new Error('Could not connect to the dictionary service. Check your connection and try again.')
+  }
+
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error('The dictionary service returned an invalid response.')
+  }
+  if (!response.ok) {
+    const message = typeof data?.message === 'string' ? data.message : ''
+    throw new Error(message || `The dictionary lookup failed (${response.status}).`)
+  }
+  if (typeof data?.word !== 'string' || !Array.isArray(data.entries)) {
+    throw new Error('The dictionary service returned an invalid response.')
+  }
+
+  const lines = []
+  let definitionCount = 0
+  const appendSenses = (senses, partOfSpeech) => {
+    for (const sense of senses) {
+      if (!sense) continue
+      if (typeof sense.definition === 'string') {
+        lines.push(`- ${partOfSpeech ? `${partOfSpeech}: ` : ''}${sense.definition}`)
+        if (Array.isArray(sense.examples) && sense.examples[0]) {
+          lines.push(`  Example: ${sense.examples[0]}`)
+        }
+        definitionCount += 1
+        if (definitionCount >= 6) return
+      }
+      if (Array.isArray(sense.subsenses)) appendSenses(sense.subsenses, partOfSpeech)
+      if (definitionCount >= 6) return
+    }
+  }
+
+  for (const entry of data.entries) {
+    if (!entry) continue
+    const pronunciation = Array.isArray(entry.pronunciations)
+      ? entry.pronunciations.find((item) => item?.type === 'ipa' && item.text)?.text
+      : ''
+    if (lines.length === 0) lines.push(pronunciation ? `${data.word} ${pronunciation}` : data.word)
+    appendSenses(Array.isArray(entry.senses) ? entry.senses : [], entry.partOfSpeech || '')
+    if (definitionCount >= 6) break
+  }
+  if (!definitionCount) throw new Error(`No English definition was found for "${word}".`)
+
+  const sourceUrl = data.source?.url
+  let source
+  try {
+    source = new URL(sourceUrl)
+  } catch {
+    throw new Error('The dictionary service did not provide a valid Wiktionary source.')
+  }
+  if (source.protocol !== 'https:' || source.hostname !== 'en.wiktionary.org') {
+    throw new Error('The dictionary service provided an invalid Wiktionary source.')
+  }
+
+  const license = data.source?.license
+  let licenseUrl = ''
+  if (typeof license?.url === 'string') {
+    try {
+      const parsedLicenseUrl = new URL(license.url)
+      if (parsedLicenseUrl.protocol === 'https:') licenseUrl = parsedLicenseUrl.href
+    } catch {
+      // The definition and source remain usable if license metadata is malformed.
+    }
+  }
+  return { text: lines.join('\n'), sourceUrl: source.href, licenseName: license?.name, licenseUrl }
+}
+
+function renderDictionaryDefinition(result, definition) {
+  result.textContent = definition.text
+}
+
+function renderDictionaryAttribution(attribution, definition) {
+  const sourceLink = document.createElement('a')
+  sourceLink.href = definition.sourceUrl
+  sourceLink.target = '_blank'
+  sourceLink.rel = 'noopener noreferrer'
+  sourceLink.textContent = 'Wiktionary'
+
+  const providerLink = document.createElement('a')
+  providerLink.href = 'https://freedictionaryapi.com/'
+  providerLink.target = '_blank'
+  providerLink.rel = 'noopener noreferrer'
+  providerLink.textContent = 'FreeDictionaryAPI.com'
+
+  const content = [sourceLink, document.createTextNode(' · '), providerLink]
+  if (definition.licenseName && definition.licenseUrl) {
+    content.push(document.createTextNode(' · '))
+    const licenseLink = document.createElement('a')
+    licenseLink.href = definition.licenseUrl
+    licenseLink.target = '_blank'
+    licenseLink.rel = 'noopener noreferrer'
+    licenseLink.textContent = definition.licenseName
+    content.push(licenseLink)
+  }
+  attribution.replaceChildren(...content)
+}
+
+async function lookupReaderSelection(action) {
+  const active = state.active
+  const selection = active?.selection
+  if (!active || !selection) return
+  const result = $('#reader-selection-result')
+  const attribution = $('#reader-selection-attribution')
+  result.hidden = false
+  attribution.hidden = true
+  attribution.replaceChildren()
+  if (selection.text.length > 5000) {
+    result.textContent = 'Select a shorter passage (5,000 characters or fewer) for definition or translation.'
+    return
+  }
+  const dictionaryWord = action === 'definition' ? selectedEnglishDictionaryWord(selection.text) : null
+  if (action === 'definition' && !dictionaryWord) {
+    result.textContent = 'Select a single English word to look it up in the dictionary.'
+    return
+  }
+  const apiKey = action === 'translation' ? $('#openrouter-key').value.trim() : ''
+  const model = action === 'translation' ? $('#openrouter-model').value : ''
+  if (action === 'translation' && (!apiKey || !model)) {
+    result.textContent = 'Add an OpenRouter API key and choose a model in AI Writer settings to use this action.'
+    return
+  }
+
+  active.selectionLookupController?.abort()
+  const controller = new AbortController()
+  active.selectionLookupController = controller
+  const menu = $('#reader-selection-menu')
+  menu.setAttribute('aria-busy', 'true')
+  menu.querySelectorAll('[data-reader-selection-action="definition"], [data-reader-selection-action="translation"]')
+    .forEach((button) => { button.disabled = true })
+  result.textContent = action === 'definition' ? 'Looking up a definition…' : 'Translating to English…'
+  try {
+    let response
+    if (action === 'definition') {
+      response = await fetchDictionaryDefinition(dictionaryWord, controller.signal)
+    } else {
+      response = await streamOpenRouter({
+        apiKey,
+        model,
+        messages: [
+          { role: 'system', content: 'You are a concise reading assistant. Return only the requested translation.' },
+          { role: 'user', content: `Translate the selected text into English. Preserve its meaning and tone. If it is already in English, return it unchanged.\n\nSelected text:\n${JSON.stringify(selection.text)}` },
+        ],
+        maxTokens: 1800,
+        signal: controller.signal,
+        onUpdate: (text) => {
+          if (state.active === active && active.selection === selection) result.textContent = text
+        },
+      })
+    }
+    if (state.active === active && active.selection === selection) {
+      if (action === 'definition') {
+        renderDictionaryDefinition(result, response)
+        renderDictionaryAttribution(attribution, response)
+        attribution.hidden = false
+      } else result.textContent = response
+    }
+  } catch (error) {
+    if (!controller.signal.aborted && state.active === active && active.selection === selection) {
+      console.error(`Could not ${action} selected book text.`, error)
+      result.textContent = error instanceof Error ? error.message : 'The lookup could not be completed.'
+    }
+  } finally {
+    if (active.selectionLookupController === controller) {
+      active.selectionLookupController = null
+      menu.setAttribute('aria-busy', 'false')
+      menu.querySelectorAll('[data-reader-selection-action="definition"], [data-reader-selection-action="translation"]')
+        .forEach((button) => { button.disabled = false })
+    }
+  }
+}
+
 function turnActivePage(direction) {
   const active = state.active
   const rendition = active?.rendition
   if (!rendition) return
+  closeReaderSelectionMenu(active)
   if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
     stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
   }
   const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
   navigation.catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+}
+
+function handleReaderTap(x, width) {
+  if (!(width > 0)) return
+  const position = x / width
+  if (position <= 0.3) turnActivePage('prev')
+  else if (position >= 0.7) turnActivePage('next')
+  else toggleReaderUi()
 }
 
 function speechSynthesisAvailable() {
@@ -2479,9 +2898,12 @@ function audiobookVoiceLabel() {
 function renderAudiobookOptions() {
   const voiceButton = $('#audiobook-voice-cycle')
   const voiceLabel = audiobookVoiceLabel()
+  const voiceLoading = Boolean(state.active?.audiobook.audioRequest)
   voiceButton.querySelector('span').textContent = voiceLabel
   voiceButton.setAttribute('aria-label', `Voice: ${voiceLabel}. Click to change voice.`)
   voiceButton.title = `Voice: ${voiceLabel}. Click to change voice.`
+  voiceButton.classList.toggle('audiobook-player__option-button--loading', voiceLoading)
+  voiceButton.setAttribute('aria-busy', String(voiceLoading))
 
   const speed = `${state.audiobookRate.toFixed(1)}×`
   const speedButton = $('#audiobook-speed-cycle')
@@ -2748,6 +3170,11 @@ async function speakGeminiAudiobookPage(active, generation, text, speechStart, t
   session.audioRequest = controller
   session.message = 'Generating Gemini speech…'
   renderAudiobookPlayer(active)
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 45_000)
   try {
     const audioBlob = await synthesizeOpenRouterSpeech({
       apiKey: openRouterApiKeyForAudiobook(),
@@ -2793,7 +3220,11 @@ async function speakGeminiAudiobookPage(active, generation, text, speechStart, t
   } catch (error) {
     if (!isCurrentAudiobookRequest(active, generation)) return
     if (session.audioRequest === controller) session.audioRequest = null
-    failAudiobookPlayback(active, error)
+    failAudiobookPlayback(active, timedOut
+      ? new Error('Gemini speech generation timed out. Check your connection and try again.')
+      : error)
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -3157,9 +3588,7 @@ async function measureBookPageCount(active, token) {
   try {
     measurementBook = ePub(active.record.data)
     await measurementBook.ready
-    measurementBook.spine.hooks.content.register((document) => {
-      document.querySelectorAll('script').forEach((script) => script.remove())
-    })
+    measurementBook.spine.hooks.content.register(sanitizeEpubContent)
     const measurementRendition = measurementBook.renderTo(container, {
       width,
       height,
@@ -3197,6 +3626,18 @@ async function measureBookPageCount(active, token) {
       container.remove()
     }
   }
+}
+
+function sanitizeEpubContent(document) {
+  document.querySelectorAll('script').forEach((script) => script.remove())
+  document.querySelectorAll('*').forEach((element) => {
+    Array.from(element.attributes).forEach(({ name, value }) => {
+      const attributeName = name.toLowerCase()
+      const isExecutableUrl = ['href', 'src', 'xlink:href', 'action', 'formaction'].includes(attributeName)
+        && /^\s*javascript:/i.test(value)
+      if (attributeName.startsWith('on') || isExecutableUrl) element.removeAttribute(name)
+    })
+  })
 }
 
 function cancelAiStoryBackground(active) {
@@ -3249,9 +3690,7 @@ async function collectAiStoryPageText(active, startCfi, request) {
   try {
     backgroundBook = ePub(active.record.data)
     await backgroundBook.ready
-    backgroundBook.spine.hooks.content.register((document) => {
-      document.querySelectorAll('script').forEach((script) => script.remove())
-    })
+    backgroundBook.spine.hooks.content.register(sanitizeEpubContent)
     backgroundRendition = backgroundBook.renderTo(container, {
       width,
       height,
@@ -3403,6 +3842,7 @@ function ensureAiStoryBackground(active, location) {
 async function openBook(id) {
   const record = state.books.find((book) => book.id === id)
   if (!record) return
+  closeReaderSelectionMenu()
   clearReaderUiTimer()
   if (state.active) {
     closeAudiobookPlayer(false)
@@ -3413,9 +3853,7 @@ async function openBook(id) {
   }
   const book = ePub(record.data)
   await book.ready
-  book.spine.hooks.content.register((document) => {
-    document.querySelectorAll('script').forEach((script) => script.remove())
-  })
+  book.spine.hooks.content.register(sanitizeEpubContent)
   const rendition = book.renderTo('epub-frame', {
     width: '100%',
     height: '100%',
@@ -3434,6 +3872,9 @@ async function openBook(id) {
     pageCountQueue: Promise.resolve(),
     pageCountObserver: null,
     pageCountResizeHandler: null,
+    selection: null,
+    selectionLookupController: null,
+    selectionMenuToken: 0,
     aiBackgroundByPage: new Map(),
     aiBackgroundRanges: [],
     aiBackgroundObjectUrls: new Set(),
@@ -3463,15 +3904,31 @@ async function openBook(id) {
     },
   }
   state.active = active
+  for (const highlight of state.highlights.filter((item) => item.bookId === record.id)) {
+    if (typeof highlight.cfiRange !== 'string') continue
+    rendition.annotations.highlight(
+      highlight.cfiRange,
+      { text: highlight.text },
+      undefined,
+      'leaf-reader-highlight',
+      { fill: '#f4d78f', 'fill-opacity': '0.42' },
+    )
+  }
   const pageDocuments = new WeakSet()
   const readerFrame = $('#epub-frame')
-  const turnPage = (direction) => {
-    if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
-      stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
-    }
-    const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
-    navigation.catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+  const dispatchStageGesture = (detail) => {
+    if (state.active !== active) return
+    readerStage.dispatchEvent(new CustomEvent('reader-gesture', { detail }))
   }
+  const pageXInStage = (pageFrame, pageX) => {
+    const frameBounds = pageFrame.getBoundingClientRect()
+    const stageBounds = readerStage.getBoundingClientRect()
+    const scaleX = pageFrame.clientWidth ? frameBounds.width / pageFrame.clientWidth : 1
+    return frameBounds.left + pageX * scaleX - stageBounds.left
+  }
+  rendition.on('selected', (cfiRange, contents) => {
+    if (state.active === active) showReaderSelectionMenu(active, cfiRange, contents)
+  })
   rendition.on('rendered', (_section, view) => {
     const pageDocument = view.contents?.document
     const pageFrame = view.iframe
@@ -3483,16 +3940,32 @@ async function openBook(id) {
     pageDocuments.add(pageDocument)
     let touchStart = null
     let suppressedTouchClick = null
+    let mousePressAt = 0
+    let pendingMouseTap = null
+    pageDocument.addEventListener('pointerdown', (event) => {
+      closeReaderSelectionMenu(active)
+      clearTimeout(pendingMouseTap)
+      pendingMouseTap = null
+      if (event.pointerType === 'mouse' && event.button === 0) {
+        mousePressAt = Date.now()
+      } else {
+        mousePressAt = 0
+      }
+    }, { capture: true })
     pageDocument.addEventListener('touchstart', (event) => {
       if (event.touches.length !== 1) {
         touchStart = null
         return
       }
       const touch = event.touches[0]
-      touchStart = { x: touch.clientX, y: touch.clientY }
+      touchStart = { x: touch.clientX, y: touch.clientY, startedAt: Date.now() }
     }, { capture: true, passive: true })
     pageDocument.addEventListener('touchmove', (event) => {
       if (!touchStart) return
+      const selection = pageDocument.getSelection()
+      if (selection && !selection.isCollapsed && selection.toString().trim()) {
+        return
+      }
       if (event.touches.length !== 1) {
         touchStart = null
         return
@@ -3510,45 +3983,76 @@ async function openBook(id) {
       touchStart = null
       const touch = event.changedTouches[0]
       if (!touch) return
+      const selection = pageDocument.getSelection()
+      const suppressClick = () => {
+        suppressedTouchClick = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+      }
+      if (selection && !selection.isCollapsed && selection.toString().trim()) {
+        suppressClick()
+        return
+      }
       const deltaX = touch.clientX - start.x
       const deltaY = touch.clientY - start.y
-      const swipeThreshold = Math.max(32, readerFrame.clientWidth * 0.08)
-      let direction
+      const swipeThreshold = Math.max(20, pageFrame.clientWidth * 0.04)
       if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
-        direction = deltaX < 0 ? 'next' : 'prev'
+        dispatchStageGesture({ type: 'swipe', direction: deltaX < 0 ? 'next' : 'prev' })
+        suppressClick()
       } else if (Math.abs(deltaX) <= 12 && Math.abs(deltaY) <= 12) {
-        const readerBounds = readerFrame.getBoundingClientRect()
-        const iframeBounds = pageFrame.getBoundingClientRect()
-        const coordinateScale = pageFrame.clientWidth ? iframeBounds.width / pageFrame.clientWidth : 1
-        const tapX = iframeBounds.left + touch.clientX * coordinateScale - readerBounds.left
-        direction = tapX < readerBounds.width / 2 ? 'prev' : 'next'
+        suppressClick()
+        if (Date.now() - start.startedAt < 450) {
+          dispatchStageGesture({
+            type: 'tap',
+            x: pageXInStage(pageFrame, touch.clientX),
+            width: readerStage.clientWidth,
+          })
+        }
+      } else {
+        suppressClick()
       }
-      if (!direction) return
-      suppressedTouchClick = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
-      turnPage(direction)
     }, { capture: true, passive: true })
     pageDocument.addEventListener('touchcancel', () => {
       touchStart = null
     }, { capture: true, passive: true })
+    pageDocument.addEventListener('contextmenu', (event) => {
+      const selection = pageDocument.getSelection()
+      if (selection && !selection.isCollapsed && selection.toString().trim()) event.preventDefault()
+    })
     pageDocument.addEventListener('click', (event) => {
       if (suppressedTouchClick) {
         const { x, y, expiresAt } = suppressedTouchClick
         suppressedTouchClick = null
-        if (Date.now() < expiresAt && Math.abs(event.clientX - x) < 32 && Math.abs(event.clientY - y) < 32) return
+        const isTouchClick = event.pointerType && event.pointerType !== 'mouse'
+        const matchesTouch = Math.abs(event.clientX - x) < 32 && Math.abs(event.clientY - y) < 32
+        if (Date.now() < expiresAt && (isTouchClick || (!event.pointerType && matchesTouch))) return
       }
-      const readerBounds = readerFrame.getBoundingClientRect()
-      const iframeBounds = pageFrame.getBoundingClientRect()
-      const coordinateScale = pageFrame.clientWidth ? iframeBounds.width / pageFrame.clientWidth : 1
-      const clickX = iframeBounds.left + event.clientX * coordinateScale - readerBounds.left
-      const pageWidth = readerBounds.width
-      if (event.button !== 0) return
-      if (!(pageWidth > 0)) {
-        showToast('Could not determine the page width for navigation.')
+      if (event.pointerType && event.pointerType !== 'mouse') return
+      if (event.button !== 0 || event.detail === 0) return
+      const selection = pageDocument.getSelection()
+      if (selection && !selection.isCollapsed && selection.toString().trim()) {
+        clearTimeout(pendingMouseTap)
+        pendingMouseTap = null
         return
       }
-
-      const direction = clickX < pageWidth / 2 ? 'prev' : 'next'
-      turnPage(direction)
+      if (event.detail > 1) {
+        clearTimeout(pendingMouseTap)
+        pendingMouseTap = null
+        return
+      }
+      const pressDuration = mousePressAt ? Date.now() - mousePressAt : 0
+      mousePressAt = 0
+      if (pressDuration >= 450) return
+      clearTimeout(pendingMouseTap)
+      pendingMouseTap = setTimeout(() => {
+        pendingMouseTap = null
+        if (state.active !== active) return
+        const currentSelection = pageDocument.getSelection()
+        if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim()) return
+        dispatchStageGesture({
+          type: 'tap',
+          x: pageXInStage(pageFrame, event.clientX),
+          width: readerStage.clientWidth,
+        })
+      }, 220)
     })
   })
   $('#reader-title').textContent = record.title
@@ -3602,15 +4106,49 @@ function renderBookmarks() {
   const records = state.bookmarks
     .filter((bookmark) => bookmark.bookId === state.active.record.id)
     .sort((first, second) => second.createdAt - first.createdAt)
-  $('#bookmark-list').innerHTML = records.map((bookmark) => `
+  const highlights = state.highlights
+    .filter((highlight) => highlight.bookId === state.active.record.id)
+    .sort((first, second) => second.createdAt - first.createdAt)
+  const bookmarkItems = records.map((bookmark) => `
     <div class="bookmark-item">
       <button class="chapter-link bookmark-link" type="button" data-bookmark-cfi="${escapeHtml(bookmark.cfi)}">
         <span>${escapeHtml(bookmark.chapter || 'Reading')}</span><small>${Number.isFinite(bookmark.percentage) ? `${bookmark.percentage}%` : '—%'}</small>
       </button>
       <button class="icon-button bookmark-remove" type="button" data-bookmark-remove="${escapeHtml(bookmark.id)}" aria-label="Remove bookmark" title="Remove bookmark"><i data-lucide="x"></i></button>
-    </div>`).join('') || '<p class="toc-empty">No bookmarks in this book yet.</p>'
+    </div>`).join('')
+  const highlightItems = highlights.map((highlight) => `
+    <div class="bookmark-item">
+      <button class="chapter-link bookmark-link highlight-link" type="button" data-highlight-cfi="${escapeHtml(highlight.cfiRange)}" aria-label="Go to highlight: ${escapeHtml(highlight.text)}">
+        <i data-lucide="highlighter" aria-hidden="true"></i><span>${escapeHtml(highlight.text.replace(/\s+/g, ' ').trim())}</span>
+      </button>
+      <button class="icon-button bookmark-remove" type="button" data-highlight-remove="${escapeHtml(highlight.id)}" aria-label="Remove highlight" title="Remove highlight"><i data-lucide="x"></i></button>
+    </div>`).join('')
+  $('#bookmark-list').innerHTML = `
+    ${bookmarkItems || '<p class="toc-empty">No bookmarks in this book yet.</p>'}
+    <h3 class="bookmark-section-title">Highlights <small>${highlights.length}</small></h3>
+    ${highlightItems || '<p class="toc-empty">No highlights saved in this book yet.</p>'}`
   icons()
   syncBookmarkButton(state.active.rendition.currentLocation()?.start?.cfi)
+}
+
+async function navigateToHighlight(rendition, cfiRange) {
+  const highlightStart = new EpubCFI(cfiRange)
+  highlightStart.collapse(true)
+  const targetCfi = highlightStart.toString()
+  const cfiComparator = new EpubCFI()
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await rendition.display(targetCfi)
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const location = rendition.currentLocation()
+    if (!location?.start?.cfi || !location.end?.cfi) continue
+    if (
+      cfiComparator.compare(location.start.cfi, targetCfi) <= 0
+      && cfiComparator.compare(targetCfi, location.end.cfi) <= 0
+    ) return
+  }
+
+  throw new Error('The reader did not reach the selected highlight.')
 }
 
 function syncBookmarkButton(cfi) {
@@ -3832,8 +4370,8 @@ function applyRenditionReaderTheme(rendition, preferences) {
       'background-color': 'transparent !important',
       'background-image': 'none !important',
       padding: '16px 4% !important',
-      'user-select': 'none !important',
-      '-webkit-user-select': 'none !important',
+      'user-select': 'text !important',
+      '-webkit-user-select': 'text !important',
       '-webkit-touch-callout': 'none !important',
       'touch-action': 'pan-y !important',
     },
@@ -3843,6 +4381,7 @@ function applyRenditionReaderTheme(rendition, preferences) {
 
 function closeReader() {
   clearReaderUiTimer()
+  closeReaderSelectionMenu()
   closeAudiobookPlayer(false)
   if (state.active) {
     cancelBookPageCount(state.active)
@@ -3863,6 +4402,19 @@ function showReaderUi() {
   if (!state.active || screen.hidden) return
   screen.classList.remove('reader-screen--ui-hidden')
   scheduleReaderUiHide()
+}
+
+function toggleReaderUi() {
+  const screen = $('#reader-screen')
+  if (!state.active || screen.hidden) return
+  if (screen.classList.contains('reader-screen--ui-hidden')) {
+    screen.classList.remove('reader-screen--ui-hidden')
+    scheduleReaderUiHide()
+  } else {
+    clearTimeout(readerUiTimer)
+    readerUiTimer = null
+    screen.classList.add('reader-screen--ui-hidden')
+  }
 }
 
 function readerNavigationPanelOpen() {
@@ -3901,6 +4453,7 @@ $('#wizard-back').addEventListener('click', returnToPreviousWriterStep)
 $('#wizard-next').addEventListener('click', continueWriterWorkflow)
 $('#revise-outline').addEventListener('click', () => reviseOutline())
 $('#generate-chapter').addEventListener('click', () => requestDraft('chapter'))
+$('#stop-chapter-generation').addEventListener('click', stopChapterGeneration)
 $('#undo-chapter').addEventListener('click', undoGeneratedChapter)
 $('#remove-chapter').addEventListener('click', removeCurrentChapter)
 $('#save-draft').addEventListener('click', handleWriterBookSave)
@@ -4034,12 +4587,15 @@ $('#book-grid').addEventListener('click', async (event) => {
     await Promise.all([
       storeRequest('books', 'readwrite', (store) => store.delete(id)),
       storeRequest('progress', 'readwrite', (store) => store.delete(id)),
+      ...state.highlights.filter((highlight) => highlight.bookId === id)
+        .map((highlight) => storeRequest('highlights', 'readwrite', (store) => store.delete(highlight.id))),
       ...state.bookmarks.filter((bookmark) => bookmark.bookId === id)
         .map((bookmark) => storeRequest('bookmarks', 'readwrite', (store) => store.delete(bookmark.id))),
     ])
     releaseBookCover(id)
     state.books = state.books.filter((item) => item.id !== id)
     state.progress = state.progress.filter((item) => item.id !== id)
+    state.highlights = state.highlights.filter((highlight) => highlight.bookId !== id)
     state.bookmarks = state.bookmarks.filter((bookmark) => bookmark.bookId !== id)
     renderLibrary()
     return
@@ -4050,19 +4606,34 @@ $('#book-grid').addEventListener('click', async (event) => {
 $('#back-button').addEventListener('click', closeReader)
 $('#reader-prev-page').addEventListener('click', () => turnActivePage('prev'))
 $('#reader-next-page').addEventListener('click', () => turnActivePage('next'))
-$('#reader-prev-zone').addEventListener('click', () => turnActivePage('prev'))
-$('#reader-next-zone').addEventListener('click', () => turnActivePage('next'))
+$('#reader-selection-menu').addEventListener('click', (event) => {
+  const action = event.target.closest('[data-reader-selection-action]')?.dataset.readerSelectionAction
+  if (!action) return
+  if (action === 'copy') copyReaderSelection()
+  else if (action === 'highlight') toggleReaderSelectionHighlight()
+  else if (action === 'definition' || action === 'translation') lookupReaderSelection(action)
+  else closeReaderSelectionMenu()
+})
 const readerStage = $('.reader-stage')
 let readerTouchStart = null
 let suppressedReaderTap = null
+readerStage.addEventListener('reader-gesture', (event) => {
+  const { type, direction, x, width } = event.detail
+  if (type === 'swipe') turnActivePage(direction)
+  else if (type === 'tap') handleReaderTap(x, width)
+})
 readerStage.addEventListener('touchstart', (event) => {
+  if (event.target instanceof HTMLIFrameElement) {
+    readerTouchStart = null
+    return
+  }
   suppressedReaderTap = null
   if (event.touches.length !== 1) {
     readerTouchStart = null
     return
   }
   const touch = event.touches[0]
-  readerTouchStart = { x: touch.clientX, y: touch.clientY }
+  readerTouchStart = { x: touch.clientX, y: touch.clientY, startedAt: Date.now() }
 }, { passive: true })
 readerStage.addEventListener('touchmove', (event) => {
   if (!readerTouchStart) return
@@ -4085,11 +4656,27 @@ readerStage.addEventListener('touchend', (event) => {
   if (!touch) return
   const deltaX = touch.clientX - start.x
   const deltaY = touch.clientY - start.y
-  const swipeThreshold = Math.max(32, readerStage.clientWidth * 0.08)
-  if (Math.abs(deltaX) < swipeThreshold || Math.abs(deltaX) <= Math.abs(deltaY)) return
-
-  suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
-  turnActivePage(deltaX < 0 ? 'next' : 'prev')
+  const swipeThreshold = Math.max(20, readerStage.clientWidth * 0.04)
+  if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
+    suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+    readerStage.dispatchEvent(new CustomEvent('reader-gesture', {
+      detail: { type: 'swipe', direction: deltaX < 0 ? 'next' : 'prev' },
+    }))
+  } else if (Math.abs(deltaX) <= 12 && Math.abs(deltaY) <= 12) {
+    const bounds = readerStage.getBoundingClientRect()
+    suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+    if (Date.now() - start.startedAt < 450) {
+      readerStage.dispatchEvent(new CustomEvent('reader-gesture', {
+        detail: {
+          type: 'tap',
+          x: touch.clientX - bounds.left,
+          width: readerStage.clientWidth,
+        },
+      }))
+    }
+  } else {
+    suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+  }
 }, { passive: true })
 readerStage.addEventListener('touchcancel', () => {
   readerTouchStart = null
@@ -4098,10 +4685,25 @@ readerStage.addEventListener('click', (event) => {
   if (!suppressedReaderTap) return
   const { x, y, expiresAt } = suppressedReaderTap
   suppressedReaderTap = null
-  if (Date.now() >= expiresAt || Math.abs(event.clientX - x) >= 32 || Math.abs(event.clientY - y) >= 32) return
+  const isTouchClick = event.pointerType && event.pointerType !== 'mouse'
+  const matchesTouch = Math.abs(event.clientX - x) < 32 && Math.abs(event.clientY - y) < 32
+  if (Date.now() >= expiresAt || (!isTouchClick && (event.pointerType || !matchesTouch))) return
   event.preventDefault()
   event.stopImmediatePropagation()
 }, true)
+readerStage.addEventListener('click', (event) => {
+  if (event.target instanceof HTMLIFrameElement) return
+  if (event.pointerType && event.pointerType !== 'mouse') return
+  if (event.button !== 0 || event.detail === 0) return
+  const bounds = readerStage.getBoundingClientRect()
+  readerStage.dispatchEvent(new CustomEvent('reader-gesture', {
+    detail: {
+      type: 'tap',
+      x: event.clientX - bounds.left,
+      width: readerStage.clientWidth,
+    },
+  }))
+})
 $('#toc-button').addEventListener('click', () => {
   $('#toc-panel').hidden = !$('#toc-panel').hidden
   $('#bookmark-panel').hidden = true
@@ -4121,6 +4723,34 @@ $('#bookmark-close').addEventListener('click', () => {
   $('#bookmarks-button').setAttribute('aria-expanded', 'false')
 })
 $('#bookmark-list').addEventListener('click', async (event) => {
+  const highlightRemove = event.target.closest('[data-highlight-remove]')
+  if (highlightRemove) {
+    const id = highlightRemove.dataset.highlightRemove
+    const highlight = state.highlights.find((item) => item.id === id)
+    try {
+      await storeRequest('highlights', 'readwrite', (store) => store.delete(id))
+      state.highlights = state.highlights.filter((item) => item.id !== id)
+      if (highlight) state.active?.rendition.annotations.remove(highlight.cfiRange, 'highlight')
+      renderBookmarks()
+    } catch (error) {
+      console.error('Could not remove the reader highlight.', error)
+      showToast('Could not remove the highlight.')
+    }
+    return
+  }
+  const highlight = event.target.closest('[data-highlight-cfi]')
+  if (highlight && state.active) {
+    closeReaderSelectionMenu()
+    $('#bookmark-panel').hidden = true
+    $('#bookmarks-button').setAttribute('aria-expanded', 'false')
+    try {
+      await navigateToHighlight(state.active.rendition, highlight.dataset.highlightCfi)
+    } catch (error) {
+      console.error('Could not navigate to the reader highlight.', error)
+      showToast('Could not open that highlight.')
+    }
+    return
+  }
   const remove = event.target.closest('[data-bookmark-remove]')
   if (remove) {
     const { bookmarkRemove: id } = remove.dataset
@@ -4131,6 +4761,7 @@ $('#bookmark-list').addEventListener('click', async (event) => {
   }
   const bookmark = event.target.closest('[data-bookmark-cfi]')
   if (bookmark && state.active) {
+    closeReaderSelectionMenu()
     $('#bookmark-panel').hidden = true
     $('#bookmarks-button').setAttribute('aria-expanded', 'false')
     await state.active.rendition.display(bookmark.dataset.bookmarkCfi)
@@ -4186,12 +4817,18 @@ $('#reader-settings').addEventListener('click', (event) => {
 })
 const readerScreen = $('#reader-screen')
 ;['pointerdown', 'touchstart', 'click', 'keydown', 'input', 'change'].forEach((eventName) => {
-  readerScreen.addEventListener(eventName, showReaderUi, { passive: eventName === 'touchstart' })
+  readerScreen.addEventListener(eventName, (event) => {
+    if (event.target?.closest?.('.reader-stage')) return
+    showReaderUi()
+  }, { passive: eventName === 'touchstart' })
 })
 document.addEventListener('pointerdown', (event) => {
   const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement
   if (!target) return
 
+  if (!$('#reader-selection-menu').hidden && !target.closest('#reader-selection-menu')) {
+    closeReaderSelectionMenu()
+  }
   if (!$('#reader-settings').hidden && !target.closest('#reader-settings, #reader-settings-button')) {
     setReaderSettingsOpen(false)
   }
@@ -4207,6 +4844,7 @@ $('#chapter-list').addEventListener('click', (event) => {
   const chapter = event.target.closest('[data-href]')
   if (!chapter || !state.active) return
   const rendition = state.active.rendition
+  closeReaderSelectionMenu()
   $('#toc-panel').hidden = true
   rendition.display(chapter.dataset.href).catch((error) => {
     showToast('That chapter could not be opened.')
@@ -4216,6 +4854,10 @@ $('#chapter-list').addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (!state.active) return
   if (event.key !== 'Escape') return
+  if (!$('#reader-selection-menu').hidden) {
+    closeReaderSelectionMenu()
+    return
+  }
   if (!$('#audiobook-player').hidden) {
     closeAudiobookPlayer()
     return

@@ -1,4 +1,54 @@
-export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onUpdate }) {
+class OpenRouterOutputLimitError extends Error {
+  constructor(partial) {
+    super('The selected model stopped at its output limit before completing this text. Try a model with a larger output limit.')
+    this.name = 'OpenRouterOutputLimitError'
+    this.partial = partial
+  }
+}
+
+export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onUpdate = () => {}, continueOnLength = false, signal }) {
+  let requestMessages = messages
+  const completedParts = []
+  let continuationCount = 0
+
+  while (true) {
+    try {
+      const result = await streamOpenRouterRequest({
+        apiKey,
+        model,
+        messages: requestMessages,
+        maxTokens,
+        signal,
+        onUpdate: (text) => onUpdate([...completedParts, text].join('')),
+      })
+      completedParts.push(result)
+      return completedParts.join('').trim()
+    } catch (error) {
+      if (
+        !(error instanceof OpenRouterOutputLimitError)
+        || !continueOnLength
+        || continuationCount >= 3
+        || !error.partial.trim()
+      ) {
+        throw error
+      }
+
+      completedParts.push(error.partial)
+      requestMessages = [
+        ...requestMessages,
+        { role: 'assistant', content: error.partial },
+        {
+          role: 'user',
+          content: 'Continue the requested chapter prose exactly where the previous response stopped. Do not repeat or summarize any text already written. Follow the original length and style instructions, and return only the continuation.',
+        },
+      ]
+      continuationCount += 1
+      onUpdate(completedParts.join(''))
+    }
+  }
+}
+
+async function streamOpenRouterRequest({ apiKey, model, messages, maxTokens, onUpdate, signal }) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -7,6 +57,7 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
       'HTTP-Referer': window.location.origin,
       'X-OpenRouter-Title': 'Leaf',
     },
+    signal,
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
   })
 
@@ -69,7 +120,7 @@ export async function streamOpenRouter({ apiKey, model, messages, maxTokens, onU
   }
 
   if (finishReason === 'length' || finishReason === 'max_tokens') {
-    throw new Error('The selected model stopped at its output limit before completing this text. Try a model with a larger output limit.')
+    throw new OpenRouterOutputLimitError(manuscript)
   }
   if (!manuscript.trim()) throw new Error('The selected model returned an empty draft.')
   return manuscript.trim()
