@@ -132,3 +132,53 @@ export async function generateOpenRouterImage({ apiKey, prompt, inputReferences 
     dataUrl: `data:${image.media_type};base64,${image.b64_json}`,
   }
 }
+
+export async function synthesizeOpenRouterSpeech({ apiKey, input, voice, signal }) {
+  const response = await fetch('https://openrouter.ai/api/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': window.location.origin,
+      'X-OpenRouter-Title': 'Leaf',
+    },
+    signal,
+    body: JSON.stringify({
+      model: 'google/gemini-3.8-flash-lite-tts',
+      input,
+      voice,
+      response_format: 'pcm',
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.error?.message || `OpenRouter returned ${response.status}.`)
+  }
+
+  const pcm = await response.arrayBuffer()
+  if (!pcm.byteLength) throw new Error('OpenRouter returned an empty speech audio response.')
+  if (pcm.byteLength > 0xffffffff - 36) throw new Error('OpenRouter returned speech audio that is too large to play.')
+
+  const header = new ArrayBuffer(44)
+  const view = new DataView(header)
+  const writeText = (offset, value) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index))
+    }
+  }
+  writeText(0, 'RIFF')
+  view.setUint32(4, 36 + pcm.byteLength, true)
+  writeText(8, 'WAVE')
+  writeText(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 24000, true)
+  view.setUint32(28, 48000, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeText(36, 'data')
+  view.setUint32(40, pcm.byteLength, true)
+  return new Blob([header, pcm], { type: 'audio/wav' })
+}

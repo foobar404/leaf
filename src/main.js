@@ -13,18 +13,24 @@ import {
   Download,
   Eye,
   EyeOff,
+  Gauge,
+  Headphones,
   Library,
   ListPlus,
+  Pause,
+  Play,
   Plus,
   RotateCcw,
   Save,
   Search,
+  SkipBack,
+  SkipForward,
   Sparkles,
   SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide'
-import { generateOpenRouterImage, streamOpenRouter } from './ai.js'
+import { generateOpenRouterImage, streamOpenRouter, synthesizeOpenRouterSpeech } from './ai.js'
 import { createEpub } from './epub.js'
 import { createUuid } from './id.js'
 import './style.css'
@@ -42,12 +48,18 @@ const iconSet = {
   Download,
   Eye,
   EyeOff,
+  Gauge,
+  Headphones,
   Library,
   ListPlus,
+  Pause,
+  Play,
   Plus,
   RotateCcw,
   Save,
   Search,
+  SkipBack,
+  SkipForward,
   Sparkles,
   SlidersHorizontal,
   Trash2,
@@ -134,14 +146,20 @@ const coverArtStyles = {
   illustrated: 'editorial illustration',
   watercolor: 'watercolor illustration',
   minimalist: 'minimalist graphic design',
-  linocut: 'bold linocut printmaking',
-  collage: 'layered mixed-media collage',
-  engraving: 'vintage etched engraving',
+  oilPainting: 'expressive oil painting with visible painterly brushwork',
+  digitalPainting: 'polished digital painting with rich colors and detailed brushwork',
+  threeDimensional: 'polished 3D illustration with dimensional materials and cinematic lighting',
+  artDeco: 'elegant Art Deco illustration with refined geometric ornament',
   graphicNovel: 'graphic-novel illustration with expressive ink lines',
-  paperCut: 'layered paper-cut illustration',
   surrealist: 'surrealist fine-art painting',
   geometric: 'geometric vector illustration',
   inkWash: 'expressive ink-wash painting',
+}
+const legacyCoverArtStyleAliases = {
+  linocut: 'digitalPainting',
+  collage: 'digitalPainting',
+  engraving: 'oilPainting',
+  paperCut: 'threeDimensional',
 }
 const coverMoods = {
   serene: 'serene and contemplative',
@@ -324,6 +342,8 @@ const state = {
   bookmarks: [],
   active: null,
   readerPreferences: loadReaderPreferences(),
+  audiobookVoiceURI: '',
+  audiobookRate: 1,
   query: '',
   writer: createWriterState(),
 }
@@ -390,14 +410,6 @@ app.innerHTML = `
             </div>
           </section>
           <div class="writer-wizard">
-            <ol class="writer-progress" aria-label="AI writing walkthrough">
-              <li data-wizard-indicator="1"><span>01</span><span>AI fields</span></li>
-              <li data-wizard-indicator="2" hidden><span>02</span><span>Prompt</span></li>
-              <li data-wizard-indicator="3" hidden><span>03</span><span>Chapters</span></li>
-              <li data-wizard-indicator="4" hidden><span>04</span><span>Draft</span></li>
-              <li data-wizard-indicator="5" hidden><span>05</span><span>Save</span></li>
-            </ol>
-
             <section class="writer-wizard-panel" data-wizard-panel="1" aria-labelledby="wizard-connection-title">
               <h2 id="wizard-connection-title">Connect your AI</h2>
               <p class="writer-panel-copy">Choose the model that will suggest chapters and help write your book.</p>
@@ -458,11 +470,8 @@ app.innerHTML = `
                   <span id="chapter-position">Chapter 1 of 1</span>
                   <button class="icon-button" type="button" id="chapter-next" aria-label="Next chapter" title="Next chapter"><i data-lucide="chevron-right"></i></button>
                   <div class="chapter-navigation__actions">
-                    <label class="auto-fill-toggle" for="auto-fill-chapters" title="Generate the remaining chapters in sequence.">
-                      <input id="auto-fill-chapters" type="checkbox" />
-                      <span>Auto</span>
-                    </label>
                     <button class="button button--primary" type="button" id="generate-chapter"><i data-lucide="sparkles"></i><span>Generate chapter</span></button>
+                    <button class="icon-button chapter-undo-button" type="button" id="undo-chapter" aria-label="Undo the last generation for this chapter" title="Undo the last generation for this chapter" hidden><i data-lucide="rotate-ccw"></i></button>
                     <button class="icon-button chapter-remove-button" type="button" id="remove-chapter" aria-label="Remove current chapter" title="Remove current chapter"><i data-lucide="trash-2"></i></button>
                   </div>
                 </div>
@@ -474,7 +483,7 @@ app.innerHTML = `
                   </button>
                   <div class="chapter-prompt-scope" role="group" aria-label="Chapter prompt scope">
                     <button type="button" id="chapter-prompt-current" aria-label="Apply prompt to the current chapter only" aria-pressed="true">Current</button>
-                    <button type="button" id="chapter-prompt-all" aria-label="Apply prompt to all chapters instead of chapter-specific prompts" aria-pressed="false">All</button>
+                    <button type="button" id="chapter-prompt-all" aria-label="Apply prompt to all chapters and generate or update every chapter from the current one onward" title="Use this prompt for all chapters and generate or update them in sequence." aria-pressed="false">All</button>
                   </div>
                 </div>
                 <textarea id="chapter-prompt" rows="2" aria-label="Chapter prompt" placeholder="Guide generation or regeneration, e.g. build tension, sharpen the dialogue, or preserve a key moment."></textarea>
@@ -510,11 +519,11 @@ app.innerHTML = `
                         <option value="illustrated">Illustration</option>
                         <option value="watercolor">Watercolor</option>
                         <option value="minimalist">Minimalist</option>
-                        <option value="linocut">Linocut print</option>
-                        <option value="collage">Mixed-media collage</option>
-                        <option value="engraving">Vintage engraving</option>
+                        <option value="oilPainting">Oil painting</option>
+                        <option value="digitalPainting">Digital painting</option>
+                        <option value="threeDimensional">3D illustration</option>
+                        <option value="artDeco">Art Deco</option>
                         <option value="graphicNovel">Graphic novel</option>
-                        <option value="paperCut">Paper cut</option>
                         <option value="surrealist">Surrealist</option>
                         <option value="geometric">Geometric</option>
                         <option value="inkWash">Ink wash</option>
@@ -560,7 +569,6 @@ app.innerHTML = `
               <span id="wizard-step-count" aria-live="polite">Step 1 of 5</span>
               <button class="button button--primary" type="button" id="wizard-next" disabled><span>Continue</span></button>
               <div class="writer-save-actions" hidden>
-                <button class="button button--outline writer-copy" type="button" id="copy-draft" disabled><span>Copy</span></button>
                 <button class="button button--primary writer-save" type="button" id="save-draft" disabled><span>Save</span></button>
               </div>
             </div>
@@ -575,11 +583,14 @@ app.innerHTML = `
           <div class="reader-tools">
             <button class="icon-button" type="button" id="toc-button" aria-label="Table of contents" title="Table of contents"><i data-lucide="align-left"></i></button>
             <button class="icon-button" type="button" id="bookmarks-button" aria-label="Saved bookmarks" title="Saved bookmarks" aria-expanded="false" aria-controls="bookmark-panel"><i data-lucide="bookmark-check"></i></button>
+            <button class="icon-button" type="button" id="audiobook-button" aria-label="Listen to audiobook" title="Listen to audiobook" aria-expanded="false" aria-controls="audiobook-player"><i data-lucide="headphones"></i></button>
             <button class="icon-button" type="button" id="reader-settings-button" aria-label="Reading settings" title="Reading settings" aria-expanded="false" aria-controls="reader-settings"><i data-lucide="sliders-horizontal"></i></button>
           </div>
         </header>
         <aside class="reader-settings" id="reader-settings" aria-label="Reading settings" hidden>
           <div class="reader-settings__header"><h2>Reading settings</h2><div><button class="reader-settings__reset" type="button" id="reset-reader-settings"><i data-lucide="rotate-ccw"></i><span>Reset</span></button><button class="icon-button" type="button" id="close-reader-settings" aria-label="Close reading settings"><i data-lucide="x"></i></button></div></div>
+          <div class="reader-settings__layout">
+          <div class="reader-settings__type-controls">
           <div class="reader-font-preview" id="reader-font-preview">
             <span class="reader-font-preview__label">Preview</span>
             <p id="reader-font-preview-text">The quick brown fox jumps over the lazy dog.</p>
@@ -611,6 +622,8 @@ app.innerHTML = `
               </button>
             </div>
           </div>
+          </div>
+          <div class="reader-settings__appearance">
           <fieldset class="reader-theme-picker"><legend>Page theme</legend><div class="reader-theme-options">
             <div class="reader-theme-category"><span class="reader-theme-category__label">Light</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="paper-white" style="--reader-theme-background:#FAF9F6" aria-pressed="true"><span class="reader-theme-option__swatch"></span><span>Paper White</span></button>
@@ -658,10 +671,16 @@ app.innerHTML = `
           </div></fieldset>
             <label class="reader-setting" id="reader-ai-background-opacity-setting" for="reader-ai-background-opacity" hidden><span>AI background opacity <output id="reader-ai-background-opacity-value">30%</output></span><input id="reader-ai-background-opacity" type="range" min="0" max="100" step="5" value="30" /></label>
             <label class="reader-setting" id="reader-ai-background-mode-setting" for="reader-ai-background-mode" hidden><span>AI background mode</span><select id="reader-ai-background-mode"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+          </div>
+          </div>
         </aside>
         <div class="reader-layout">
           <aside class="toc-panel" id="toc-panel" hidden><div class="toc-panel__head"><h2>Contents</h2><button class="icon-button" type="button" id="toc-close" aria-label="Close contents"><i data-lucide="x"></i></button></div><nav id="chapter-list" class="chapter-list"></nav></aside>
-          <aside class="toc-panel bookmark-panel" id="bookmark-panel" hidden><div class="toc-panel__head"><h2>Bookmarks</h2><button class="icon-button" type="button" id="bookmark-close" aria-label="Close bookmarks"><i data-lucide="x"></i></button></div><button class="icon-button bookmark-current-action" type="button" id="bookmark-current" aria-label="Bookmark this page" title="Bookmark this page" aria-pressed="false"><i data-lucide="bookmark"></i></button><nav id="bookmark-list" class="chapter-list" aria-label="Saved bookmarks"></nav></aside>
+          <aside class="toc-panel bookmark-panel" id="bookmark-panel" hidden>
+            <div class="toc-panel__head"><h2>Bookmarks</h2><button class="icon-button" type="button" id="bookmark-close" aria-label="Close bookmarks"><i data-lucide="x"></i></button></div>
+            <nav id="bookmark-list" class="chapter-list" aria-label="Saved bookmarks"></nav>
+            <button class="button button--primary bookmark-current-action" type="button" id="bookmark-current" aria-label="Add bookmark" title="Add bookmark" aria-pressed="false"><i data-lucide="bookmark"></i><span>Add bookmark</span></button>
+          </aside>
           <div class="reader-main">
             <div class="reader-stage">
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
@@ -673,6 +692,38 @@ app.innerHTML = `
         </div>
       </section>
     </main>
+    <section class="audiobook-player" id="audiobook-player" role="dialog" aria-modal="true" aria-labelledby="audiobook-title" hidden>
+      <div class="audiobook-player__background" id="audiobook-background" aria-hidden="true"></div>
+      <div class="audiobook-player__shade" aria-hidden="true"></div>
+      <button class="icon-button audiobook-player__close" type="button" id="audiobook-close" aria-label="Close audiobook player" title="Close audiobook player"><i data-lucide="x"></i></button>
+      <div class="audiobook-player__content">
+        <header class="audiobook-player__book">
+          <div class="audiobook-player__cover" id="audiobook-cover" aria-hidden="true"></div>
+          <p class="audiobook-player__eyebrow">Audiobook</p>
+          <h2 id="audiobook-title"></h2>
+          <p class="audiobook-player__author" id="audiobook-author"></p>
+          <p class="audiobook-player__position" id="audiobook-position"></p>
+        </header>
+        <div class="audiobook-player__transcript" id="audiobook-transcript" role="region" aria-label="Text from the current page" tabindex="0">
+          <p id="audiobook-text">Press play to read from the current page.</p>
+        </div>
+        <footer class="audiobook-player__footer">
+          <div class="audiobook-player__controls">
+            <button class="audiobook-player__skip" type="button" id="audiobook-skip-back" aria-label="Previous page" title="Previous page"><i data-lucide="skip-back"></i></button>
+            <button class="audiobook-player__toggle" type="button" id="audiobook-toggle" aria-label="Play audiobook" title="Play audiobook"><i data-lucide="play"></i></button>
+            <button class="audiobook-player__skip" type="button" id="audiobook-skip-forward" aria-label="Skip to next page" title="Skip to next page"><i data-lucide="skip-forward"></i></button>
+          </div>
+          <div class="audiobook-player__chapter-progress" id="audiobook-chapter-progress" role="progressbar" aria-label="Current chapter progress" aria-valuemin="0" aria-valuemax="100" hidden>
+            <span id="audiobook-chapter-progress-fill"></span>
+          </div>
+          <span class="audiobook-player__page-count" id="audiobook-page-count">— / —</span>
+          <div class="audiobook-player__options">
+            <button class="audiobook-player__option-button audiobook-player__option-button--voice" type="button" id="audiobook-voice-cycle" aria-label="Voice: Browser default. Click to change voice." title="Voice: Browser default. Click to change voice."><i data-lucide="headphones" aria-hidden="true"></i><span id="audiobook-voice-value">Browser default</span></button>
+            <button class="audiobook-player__option-button audiobook-player__option-button--speed" type="button" id="audiobook-speed-cycle" aria-label="Reading speed: 1.0 times. Click to change speed." title="Reading speed: 1.0×. Click to change speed."><i data-lucide="gauge" aria-hidden="true"></i><span id="audiobook-speed-value">1.0×</span></button>
+          </div>
+        </footer>
+      </div>
+    </section>
     <input id="epub-input" type="file" accept=".epub,application/epub+zip" hidden />
     <div class="drop-overlay" id="drop-overlay" hidden><div><i data-lucide="book-plus"></i><b>Drop your book here</b><span>EPUB files only</span></div></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -1056,14 +1107,6 @@ function renderWriterStep() {
   document.querySelectorAll('[data-wizard-panel]').forEach((panel) => {
     panel.hidden = Number(panel.dataset.wizardPanel) !== step
   })
-  document.querySelectorAll('[data-wizard-indicator]').forEach((indicator) => {
-    const indicatorStep = Number(indicator.dataset.wizardIndicator)
-    indicator.hidden = indicatorStep !== step
-    indicator.classList.toggle('is-current', indicatorStep === step)
-    indicator.classList.toggle('is-complete', indicatorStep < step)
-    if (indicatorStep === step) indicator.setAttribute('aria-current', 'step')
-    else indicator.removeAttribute('aria-current')
-  })
   $('#wizard-step-count').textContent = `Step ${step} of 5`
   $('#wizard-back').disabled = busy || step === 1
   $('#wizard-next').hidden = step === 5
@@ -1092,7 +1135,6 @@ function updateWriterControls() {
   $('#revise-outline').disabled = busy || !$('#outline-revision-request').value.trim() || !parseOutline($('#chapter-outline').value).length
   $('#generate-chapter').disabled = busy || state.writer.stage !== 'chapters' || !activeChapter
   updateChapterActionButton(activeChapter)
-  $('#auto-fill-chapters').disabled = busy
   $('#chapter-previous').disabled = busy || state.writer.currentChapter === 0
   $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !activeChapter?.content.trim()
   $('#remove-chapter').disabled = busy || !activeChapter
@@ -1113,7 +1155,6 @@ function updateWriterControls() {
     && !state.writer.coverCandidate
     && !coverTextMismatch
   $('#save-draft').disabled = !canSaveBook
-  $('#copy-draft').disabled = !canSaveBook
   const hasCoverCandidate = Boolean(state.writer.coverCandidate)
   $('#generate-cover').hidden = hasCoverCandidate
   $('#generate-cover').disabled = busy
@@ -1147,12 +1188,22 @@ function countWords(text) {
 
 function updateChapterActionButton(chapter) {
   const button = $('#generate-chapter')
+  const generateAllChapters = state.writer.chapterPromptScope === 'all'
   const hasUndo = typeof chapter?.undoContent === 'string'
   const hasContent = Boolean(chapter?.content.trim())
-  const icon = hasUndo && !state.writer.busy ? 'rotate-ccw' : 'sparkles'
+  const hasContentFromHere = state.writer.chapters
+    .slice(state.writer.currentChapter)
+    .some((item) => item.content.trim())
+  const icon = 'sparkles'
   const label = state.writer.busy
-    ? hasContent ? 'Updating chapter...' : 'Writing chapter...'
-    : hasUndo ? 'Undo' : hasContent ? 'Update chapter' : 'Generate chapter'
+    ? generateAllChapters
+      ? hasContentFromHere ? 'Updating chapters...' : 'Writing chapters...'
+      : hasContent ? 'Updating chapter...' : 'Writing chapter...'
+    : generateAllChapters
+      ? hasContentFromHere ? 'Update from here' : 'Generate from here'
+      : hasContent ? 'Update chapter' : 'Generate chapter'
+  $('#undo-chapter').hidden = !hasUndo || state.writer.busy
+  $('#undo-chapter').disabled = state.writer.busy || !hasUndo
   button.querySelector('span').textContent = label
   if (button.dataset.chapterActionIcon !== icon) {
     button.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`
@@ -1229,6 +1280,17 @@ function persistOpenRouterApiKey(removeWhenEmpty = false) {
   }
 }
 
+function openRouterApiKeyForAudiobook() {
+  let apiKey
+  try {
+    apiKey = localStorage.getItem(openRouterKeyStorageKey)?.trim()
+  } catch {
+    throw new Error('Could not access your OpenRouter API key in browser storage.')
+  }
+  if (!apiKey) throw new Error('Add your OpenRouter API key in AI Writer settings to use Gemini voices.')
+  return apiKey
+}
+
 function restoreOpenRouterApiKey() {
   const input = $('#openrouter-key')
   if (input.value.trim()) return
@@ -1295,7 +1357,6 @@ function createWriterDraftRecord() {
       outlineRevisionRequest: $('#outline-revision-request').value,
       bookTitle: $('#book-title').value,
       bookAuthor: $('#book-author').value,
-      autoFill: $('#auto-fill-chapters').checked,
       coverArtStyle: $('#cover-art-style').value,
       coverMood: $('#cover-mood').value,
     },
@@ -1397,8 +1458,8 @@ function resumeWriterDraft(draft) {
   $('#outline-revision-request').value = String(fields.outlineRevisionRequest || '')
   $('#book-title').value = String(fields.bookTitle || '')
   $('#book-author').value = String(fields.bookAuthor || '')
-  $('#auto-fill-chapters').checked = Boolean(fields.autoFill)
-  const coverArtStyle = String(fields.coverArtStyle || '')
+  const savedCoverArtStyle = String(fields.coverArtStyle || '')
+  const coverArtStyle = legacyCoverArtStyleAliases[savedCoverArtStyle] || savedCoverArtStyle
   const coverMood = String(fields.coverMood || '')
   $('#cover-art-style').value = Object.hasOwn(coverArtStyles, coverArtStyle) ? coverArtStyle : 'photographic'
   $('#cover-mood').value = Object.hasOwn(coverMoods, coverMood) ? coverMood : ''
@@ -1454,6 +1515,10 @@ function renderCurrentChapter() {
   scheduleWriterAutosave()
 }
 
+function scrollManuscriptToBottom(editor) {
+  editor.scrollTop = editor.scrollHeight
+}
+
 function getCurrentChapterPrompt(chapter = state.writer.chapters[state.writer.currentChapter]) {
   return state.writer.chapterPromptScope === 'all'
     ? state.writer.allChapterPrompt
@@ -1485,6 +1550,7 @@ function setChapterPromptScope(scope) {
   state.writer.chapterPromptScope = scope
   $('#chapter-prompt').value = getCurrentChapterPrompt(chapter)
   renderChapterPromptScope()
+  updateWriterControls()
   scheduleWriterAutosave()
 }
 
@@ -1649,7 +1715,6 @@ async function loadLibraryBookIntoWriter(recordId) {
     $('#page-count').value = String(Math.max(1, Math.ceil(wordCount / 200)))
     $('#chapter-outline').value = chapters.map((chapter, index) => `${index + 1}. ${chapter.title}`).join('\n')
     $('#outline-revision-request').value = ''
-    $('#auto-fill-chapters').checked = false
     state.writer.outlinePrompt = outlinePromptSignature()
     state.writer.wizardStep = 4
     if (record.coverOriginal?.data && record.coverOriginal.mediaType) {
@@ -2040,14 +2105,13 @@ async function requestChapterDrafts() {
   const pages = Number($('#page-count').value)
   const editor = $('#manuscript-editor')
   const startIndex = state.writer.currentChapter
-  const autoFill = $('#auto-fill-chapters').checked
-  const chapterIndexes = autoFill
+  const generateAllChapters = state.writer.chapterPromptScope === 'all'
+  const chapterIndexes = generateAllChapters
     ? state.writer.chapters
       .map((chapter, index) => ({ chapter, index }))
-      .filter(({ chapter, index }) => index >= startIndex && (index === startIndex || !chapter.content.trim()))
+      .filter(({ index }) => index >= startIndex)
       .map(({ index }) => index)
     : [startIndex]
-  const skipped = Math.max(0, state.writer.chapters.length - startIndex - chapterIndexes.length)
 
   if (!apiKey) {
     setWriterStatus('Add your OpenRouter API key to begin.', 'error')
@@ -2086,11 +2150,12 @@ async function requestChapterDrafts() {
         notifiedAboutChunking = true
       }
       editor.value = previous
+      editor.scrollTop = 0
       $('#chapter-prompt').value = getCurrentChapterPrompt(chapter)
       $('#chapter-position').textContent = `Chapter ${chapterIndex + 1} of ${state.writer.chapters.length}`
       updateWriterControls()
       scheduleWriterAutosave()
-      setWriterStatus(autoFill
+      setWriterStatus(generateAllChapters
         ? `Writing chapter ${chapterIndex + 1} of ${state.writer.chapters.length}...`
         : 'Finding the first line...')
       const revisedSegments = []
@@ -2111,6 +2176,7 @@ async function requestChapterDrafts() {
           onUpdate: (text) => {
             chapter.content = [...revisedSegments, text].join('\n\n')
             editor.value = chapter.content
+            scrollManuscriptToBottom(editor)
             updateWriterControls()
             scheduleWriterAutosave()
           },
@@ -2118,15 +2184,17 @@ async function requestChapterDrafts() {
         revisedSegments.push(result)
         chapter.content = revisedSegments.join('\n\n')
         editor.value = chapter.content
+        scrollManuscriptToBottom(editor)
         updateWriterControls()
         scheduleWriterAutosave()
       }
       activeChapterDraft = null
       written += 1
       renderCurrentChapter()
+      scrollManuscriptToBottom(editor)
     }
-    setWriterStatus(autoFill
-      ? `Auto fill complete. Wrote ${written} chapter${written === 1 ? '' : 's'}${skipped ? ` and left ${skipped} existing chapter${skipped === 1 ? '' : 's'} unchanged` : ''}.`
+    setWriterStatus(generateAllChapters
+      ? `Finished generating or updating ${written} chapter${written === 1 ? '' : 's'}.`
       : 'Chapter ready. Review it or move to the next chapter.')
   } catch (error) {
     if (activeChapterDraft) {
@@ -2191,7 +2259,7 @@ async function reviseOutline() {
   }
 }
 
-async function saveWriterBook({ copy = false } = {}) {
+async function saveWriterBook() {
   if (writerSaveInProgress || state.writer.busy) return
   writerSaveInProgress = true
   setWriterBusy(true, 'save')
@@ -2215,9 +2283,7 @@ async function saveWriterBook({ copy = false } = {}) {
         || (typeof state.writer.cover.generatedAuthor === 'string' && state.writer.cover.generatedAuthor !== author))) {
       throw new Error('The AI cover title or author no longer matches the book details. Regenerate the cover before saving.')
     }
-    const id = copy ? createUuid() : state.writer.savedBookId || state.writer.loadedBookId || createUuid()
-    const existing = state.books.find((book) => book.id === id)
-    const replacingLoadedBook = !copy && id === state.writer.loadedBookId
+    const id = createUuid()
     const cover = await createTitledCover(state.writer.cover, title, author)
     const data = createEpub({ title, author, chapters, cover })
     const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'leaf-book'}.epub`
@@ -2227,7 +2293,7 @@ async function saveWriterBook({ copy = false } = {}) {
       author,
       fileName,
       data,
-      addedAt: existing?.addedAt || Date.now(),
+      addedAt: Date.now(),
       source: 'ai',
       ...(state.writer.cover?.source === 'ai' || state.writer.cover?.source === 'ai-background' || state.writer.cover?.source === 'ai-titled'
         ? {
@@ -2245,23 +2311,11 @@ async function saveWriterBook({ copy = false } = {}) {
         : {}),
     }
     const draftIdsToRemove = new Set(state.writer.draftId ? [state.writer.draftId] : [])
-    for (const draft of state.drafts) {
-      if (draft.writer?.savedBookId === id
-        || (replacingLoadedBook && draft.writer?.loadedBookId === state.writer.loadedBookId)) {
-        draftIdsToRemove.add(draft.id)
-      }
-    }
-    await storeTransaction(['books', 'drafts', 'progress'], 'readwrite', (transaction) => {
-      transaction.objectStore('books').put(record)
-      if (existing) transaction.objectStore('progress').delete(id)
+    await storeTransaction(['books', 'drafts'], 'readwrite', (transaction) => {
+      transaction.objectStore('books').add(record)
       for (const draftId of draftIdsToRemove) transaction.objectStore('drafts').delete(draftId)
     })
-    if (existing) {
-      state.progress = state.progress.filter((item) => item.id !== id)
-      state.books = state.books.map((book) => book.id === id ? record : book)
-    } else {
-      state.books.push(record)
-    }
+    state.books.push(record)
     state.drafts = state.drafts.filter((draft) => !draftIdsToRemove.has(draft.id))
     state.writer.draftId = null
     state.writer.savedBookId = id
@@ -2269,21 +2323,17 @@ async function saveWriterBook({ copy = false } = {}) {
     renderWriterLibraryOptions()
     updateWriterControls()
     renderLibrary()
-    setWriterStatus(copy
-      ? 'A copy is saved to your library. Keep revising here to update the copy.'
-      : existing ? 'The saved book has been replaced. Keep revising here to update it.' : 'Saved to your library. Keep revising here to update this book.')
-    showToast(copy
-      ? 'A copy of your book is on the shelf.'
-      : existing ? 'Your saved book has been replaced.' : 'Your book is on the shelf.')
+    setWriterStatus('A copy is saved to your library. Keep revising here to save another copy.')
+    showToast('A copy of your book is on the shelf.')
   } finally {
     writerSaveInProgress = false
     setWriterBusy(false)
   }
 }
 
-async function handleWriterBookSave(copy) {
+async function handleWriterBookSave() {
   try {
-    await saveWriterBook({ copy })
+    await saveWriterBook()
     showLibrary({ flushDraft: false })
   } catch (error) {
     setWriterStatus(error.message || 'The book could not be saved.', 'error')
@@ -2325,10 +2375,731 @@ async function importFile(file) {
 }
 
 function turnActivePage(direction) {
-  const rendition = state.active?.rendition
+  const active = state.active
+  const rendition = active?.rendition
   if (!rendition) return
+  if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
+    stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
+  }
   const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
   navigation.catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
+}
+
+function speechSynthesisAvailable() {
+  return 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function'
+}
+
+function speechVoiceKey(voice) {
+  return voice.voiceURI || `${voice.name}|${voice.lang}`
+}
+
+const audiobookRates = Array.from({ length: 16 }, (_, index) => (index + 5) / 10)
+const browserAudiobookVoicePrefix = 'browser:'
+const geminiAudiobookVoicePrefix = 'gemini:'
+const geminiAudiobookVoices = [
+  'Zephyr',
+  'Puck',
+  'Charon',
+  'Kore',
+  'Fenrir',
+  'Leda',
+  'Orus',
+  'Aoede',
+  'Callirrhoe',
+  'Autonoe',
+  'Enceladus',
+  'Iapetus',
+  'Umbriel',
+  'Algieba',
+  'Despina',
+  'Erinome',
+  'Algenib',
+  'Rasalgethi',
+  'Laomedeia',
+  'Achernar',
+  'Alnilam',
+  'Schedar',
+  'Gacrux',
+  'Pulcherrima',
+  'Achird',
+  'Zubenelgenubi',
+  'Vindemiatrix',
+  'Sadachbia',
+  'Sadaltager',
+  'Sulafat',
+]
+
+function availableAudiobookVoices() {
+  return speechSynthesisAvailable()
+    ? window.speechSynthesis.getVoices().slice().sort((a, b) => (
+      Number(b.default) - Number(a.default) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name)
+    ))
+    : []
+}
+
+function renderAudiobookVoices() {
+  const voices = availableAudiobookVoices()
+  if (
+    state.audiobookVoiceURI.startsWith(browserAudiobookVoicePrefix)
+    && voices.length
+    && !voices.some((voice) => `${browserAudiobookVoicePrefix}${speechVoiceKey(voice)}` === state.audiobookVoiceURI)
+  ) {
+    state.audiobookVoiceURI = ''
+  }
+  if (
+    state.audiobookVoiceURI.startsWith(geminiAudiobookVoicePrefix)
+    && !geminiAudiobookVoices.includes(state.audiobookVoiceURI.slice(geminiAudiobookVoicePrefix.length))
+  ) {
+    state.audiobookVoiceURI = ''
+  }
+  renderAudiobookOptions()
+}
+
+function selectedAudiobookVoice() {
+  if (!speechSynthesisAvailable() || !state.audiobookVoiceURI.startsWith(browserAudiobookVoicePrefix)) return null
+  const voiceKey = state.audiobookVoiceURI.slice(browserAudiobookVoicePrefix.length)
+  return window.speechSynthesis.getVoices().find((voice) => speechVoiceKey(voice) === voiceKey) || null
+}
+
+function selectedGeminiAudiobookVoice() {
+  if (!state.audiobookVoiceURI.startsWith(geminiAudiobookVoicePrefix)) return ''
+  const voice = state.audiobookVoiceURI.slice(geminiAudiobookVoicePrefix.length)
+  return geminiAudiobookVoices.includes(voice) ? voice : ''
+}
+
+function audiobookVoiceLabel() {
+  const geminiVoice = selectedGeminiAudiobookVoice()
+  if (geminiVoice) return `Gemini ${geminiVoice}`
+  const browserVoice = selectedAudiobookVoice()
+  return browserVoice
+    ? browserVoice.lang ? `${browserVoice.name} (${browserVoice.lang})` : browserVoice.name
+    : 'Browser default'
+}
+
+function renderAudiobookOptions() {
+  const voiceButton = $('#audiobook-voice-cycle')
+  const voiceLabel = audiobookVoiceLabel()
+  voiceButton.querySelector('span').textContent = voiceLabel
+  voiceButton.setAttribute('aria-label', `Voice: ${voiceLabel}. Click to change voice.`)
+  voiceButton.title = `Voice: ${voiceLabel}. Click to change voice.`
+
+  const speed = `${state.audiobookRate.toFixed(1)}×`
+  const speedButton = $('#audiobook-speed-cycle')
+  speedButton.querySelector('span').textContent = speed
+  speedButton.setAttribute('aria-label', `Reading speed: ${state.audiobookRate.toFixed(1)} times. Click to change speed.`)
+  speedButton.title = `Reading speed: ${state.audiobookRate.toFixed(1)} times. Click to change speed.`
+}
+
+function setAudiobookVoice(voiceURI) {
+  state.audiobookVoiceURI = voiceURI
+  const active = state.active
+  if (!active?.audiobook.open) {
+    renderAudiobookOptions()
+    return
+  }
+  const session = active.audiobook
+  const voiceName = audiobookVoiceLabel()
+  if (session.autoAdvancing) {
+    session.message = session.status === 'playing'
+      ? `${voiceName} will be used on the next page.`
+      : `${voiceName} selected. Resume to continue with it.`
+    renderAudiobookPlayer(active)
+    return
+  }
+  if (!['playing', 'paused'].includes(session.status)) {
+    session.message = `${voiceName} selected.`
+    renderAudiobookPlayer(active)
+    return
+  }
+
+  const wasPlaying = session.status === 'playing'
+  const startIndex = session.currentCharIndex
+  session.generation += 1
+  const generation = session.generation
+  cancelAudiobookOutput(active)
+  session.message = wasPlaying
+    ? `Switching to ${voiceName}…`
+    : `${voiceName} selected. Resume to hear the new voice.`
+  if (wasPlaying) speakAudiobookPage(active, generation, startIndex)
+  else renderAudiobookPlayer(active)
+}
+
+function cycleAudiobookVoice() {
+  const choices = [
+    '',
+    ...geminiAudiobookVoices.map((voice) => `${geminiAudiobookVoicePrefix}${voice}`),
+    ...availableAudiobookVoices().map((voice) => `${browserAudiobookVoicePrefix}${speechVoiceKey(voice)}`),
+  ]
+  const currentIndex = choices.indexOf(state.audiobookVoiceURI)
+  const nextIndex = (currentIndex + 1) % choices.length
+  setAudiobookVoice(choices[nextIndex])
+}
+
+function cycleAudiobookRate() {
+  const currentIndex = audiobookRates.findIndex((rate) => Math.abs(rate - state.audiobookRate) < 0.001)
+  state.audiobookRate = audiobookRates[(currentIndex + 1) % audiobookRates.length]
+  const active = state.active
+  if (!active?.audiobook.open) {
+    renderAudiobookOptions()
+    return
+  }
+  const speed = `${state.audiobookRate.toFixed(1)}×`
+  if (active.audiobook.audio) active.audiobook.audio.playbackRate = state.audiobookRate
+  active.audiobook.message = ['playing', 'paused'].includes(active.audiobook.status)
+    ? active.audiobook.audio
+      ? `Read speed set to ${speed}.`
+      : `Read speed set to ${speed}; it will change on the next page.`
+    : `Read speed set to ${speed}.`
+  renderAudiobookPlayer(active)
+}
+
+function renderAudiobookPlayer(active) {
+  if (state.active !== active) return
+  const session = active.audiobook
+  const button = $('#audiobook-toggle')
+  const isPlaying = session.status === 'playing'
+  const icon = isPlaying ? 'pause' : 'play'
+  button.innerHTML = `<i data-lucide="${icon}"></i>`
+  button.setAttribute('aria-label', isPlaying ? 'Pause audiobook' : session.status === 'paused' ? 'Resume audiobook' : 'Play audiobook')
+  button.title = isPlaying ? 'Pause audiobook' : session.status === 'paused' ? 'Resume audiobook' : 'Play audiobook'
+  button.disabled = !speechSynthesisAvailable() && geminiAudiobookVoices.length === 0
+  $('#audiobook-position').textContent = session.position || ''
+  renderAudiobookOptions()
+  icons()
+}
+
+function renderAudiobookTranscript(active, text, placeholder = 'Press play to read from the current page.') {
+  const session = active.audiobook
+  const textElement = $('#audiobook-text')
+  const transcript = $('#audiobook-transcript')
+  const fragment = document.createDocumentFragment()
+  session.text = text
+  session.wordOffsets = []
+  session.wordElements = []
+  session.activeWordElement = null
+  session.currentCharIndex = 0
+  session.speechText = ''
+  session.speechTextOffset = 0
+  session.transcriptSectionIndex = active.rendition.currentLocation()?.start?.index ?? null
+
+  if (!text) {
+    textElement.textContent = placeholder
+    transcript.scrollTop = 0
+    return
+  }
+
+  let offset = 0
+  for (const part of text.split(/(\s+)/)) {
+    if (!part) continue
+    if (/^\s+$/.test(part)) {
+      fragment.append(document.createTextNode(part))
+    } else {
+      const word = document.createElement('span')
+      word.className = 'audiobook-player__word'
+      word.textContent = part
+      session.wordOffsets.push({ start: offset, end: offset + part.length })
+      session.wordElements.push(word)
+      fragment.append(word)
+    }
+    offset += part.length
+  }
+  textElement.replaceChildren(fragment)
+  transcript.scrollTop = 0
+}
+
+function audiobookTranscriptOffset(session, speechText, sectionIndex) {
+  if (sectionIndex === null || session.transcriptSectionIndex !== sectionIndex) return null
+  if (session.speechText === speechText) return session.speechTextOffset
+  const searchStart = session.speechText
+    ? session.speechTextOffset + session.speechText.length
+    : 0
+  const offset = session.text.indexOf(speechText, searchStart)
+  return offset === -1 ? null : offset
+}
+
+function highlightAudiobookWord(active, charIndex) {
+  const session = active.audiobook
+  if (!Number.isFinite(charIndex)) return
+  let wordIndex = session.wordOffsets.findIndex(({ start, end }) => charIndex >= start && charIndex < end)
+  if (wordIndex === -1) wordIndex = session.wordOffsets.findIndex(({ start }) => start >= charIndex)
+  if (wordIndex === -1) return
+
+  session.currentCharIndex = Math.max(0, charIndex - session.speechTextOffset)
+  const word = session.wordElements[wordIndex]
+  if (word === session.activeWordElement) return
+  session.activeWordElement?.classList.remove('audiobook-player__word--active')
+  session.activeWordElement?.removeAttribute('aria-current')
+  word.classList.add('audiobook-player__word--active')
+  word.setAttribute('aria-current', 'true')
+  session.activeWordElement = word
+
+  const transcript = $('#audiobook-transcript')
+  const transcriptBounds = transcript.getBoundingClientRect()
+  const wordBounds = word.getBoundingClientRect()
+  const transcriptMidpoint = transcriptBounds.top + transcript.clientHeight / 2
+  const wordMidpoint = wordBounds.top + wordBounds.height / 2
+  if (wordMidpoint > transcriptMidpoint || wordBounds.top < transcriptBounds.top) {
+    transcript.scrollTop += wordMidpoint - transcriptMidpoint
+  }
+}
+
+function syncAudiobookPosition(active, location = active.rendition.currentLocation()) {
+  if (!active.audiobook.open) return
+  const chapter = $('#chapter-label').textContent.trim()
+  const page = $('#page-count-label').textContent.trim()
+  const displayedPage = Number(location?.start?.displayed?.page)
+  const displayedTotal = Number(location?.start?.displayed?.total)
+  const progress = $('#audiobook-chapter-progress')
+  const progressFill = $('#audiobook-chapter-progress-fill')
+  if (Number.isInteger(displayedPage) && displayedPage > 0 && Number.isInteger(displayedTotal) && displayedTotal > 0) {
+    const percentage = Math.min(100, (displayedPage / displayedTotal) * 100)
+    progress.hidden = false
+    progressFill.style.width = `${percentage}%`
+    progress.setAttribute('aria-valuenow', percentage.toFixed(1))
+    progress.setAttribute('aria-valuetext', `Page ${displayedPage} of ${displayedTotal}`)
+    progress.title = `Current chapter progress: page ${displayedPage} of ${displayedTotal}`
+  } else {
+    progress.hidden = true
+  }
+  $('#audiobook-page-count').textContent = page
+  active.audiobook.position = chapter
+  renderAudiobookPlayer(active)
+}
+
+function audiobookCurrentPageText(active) {
+  const location = active.rendition.currentLocation()
+  if (!location?.start?.cfi || !location.end?.cfi) return ''
+  const start = active.rendition.getRange(location.start.cfi)
+  const end = active.rendition.getRange(location.end.cfi)
+  if (!start || !end || start.startContainer.ownerDocument !== end.endContainer.ownerDocument) return ''
+  const range = start.startContainer.ownerDocument.createRange()
+  range.setStart(start.startContainer, start.startOffset)
+  range.setEnd(end.endContainer, end.endOffset)
+  return range.toString().replace(/\s+/g, ' ').trim()
+}
+
+function audiobookCurrentTranscriptText(active, pageText) {
+  if (!pageText) return pageText
+  const location = active.rendition.currentLocation()
+  if (!location?.start?.cfi || !location.end?.cfi || location.start.index !== location.end.index) return pageText
+  const contents = active.rendition.getContents().find((item) => item.sectionIndex === location.start.index)
+  if (!contents) return pageText
+
+  const end = contents.range(location.end.cfi)
+  const root = contents.document.body || contents.document.documentElement
+  const remainder = contents.document.createRange()
+  remainder.setStart(end.endContainer, end.endOffset)
+  remainder.setEnd(root, root.childNodes.length)
+  const followingText = remainder.toString().replace(/\s+/gu, ' ').trim()
+  return followingText ? `${pageText} ${followingText}` : pageText
+}
+
+function isCurrentAudiobookRequest(active, generation) {
+  return state.active === active
+    && active.audiobook.open
+    && active.audiobook.generation === generation
+    && !$('#audiobook-player').hidden
+}
+
+function clearAudiobookAudio(session) {
+  if (session.audio) {
+    session.audio.onended = null
+    session.audio.onerror = null
+    session.audio.ontimeupdate = null
+    session.audio.pause()
+    session.audio.removeAttribute('src')
+    session.audio.load()
+    session.audio = null
+  }
+  if (session.audioUrl) {
+    URL.revokeObjectURL(session.audioUrl)
+    session.audioUrl = null
+  }
+}
+
+function cancelAudiobookOutput(active) {
+  const session = active.audiobook
+  const hadUtterance = Boolean(session.utterance)
+  session.audioRequest?.abort()
+  session.audioRequest = null
+  clearAudiobookAudio(session)
+  if (hadUtterance && speechSynthesisAvailable()) window.speechSynthesis.cancel()
+  session.utterance = null
+}
+
+function playGeminiAudiobookAudio(active, generation, audio) {
+  audio.play().catch((error) => {
+    const session = active.audiobook
+    if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
+    if (error?.name === 'NotAllowedError') {
+      session.status = 'paused'
+      session.message = 'Gemini audio is ready. Press play to start.'
+      renderAudiobookPlayer(active)
+      showToast('Gemini audio is ready. Press play to start.')
+      return
+    }
+    failAudiobookPlayback(active, error)
+  })
+}
+
+async function speakGeminiAudiobookPage(active, generation, text, speechStart, transcriptOffset, voice) {
+  const session = active.audiobook
+  const controller = new AbortController()
+  session.audioRequest = controller
+  session.message = 'Generating Gemini speech…'
+  renderAudiobookPlayer(active)
+  try {
+    const audioBlob = await synthesizeOpenRouterSpeech({
+      apiKey: openRouterApiKeyForAudiobook(),
+      input: text.slice(speechStart),
+      voice,
+      signal: controller.signal,
+    })
+    if (!isCurrentAudiobookRequest(active, generation) || session.audioRequest !== controller) return
+    session.audioRequest = null
+    const audioUrl = URL.createObjectURL(audioBlob)
+    const audio = new Audio(audioUrl)
+    session.audioUrl = audioUrl
+    session.audio = audio
+    audio.preload = 'auto'
+    audio.playbackRate = state.audiobookRate
+    audio.ontimeupdate = () => {
+      if (
+        !isCurrentAudiobookRequest(active, generation)
+        || session.audio !== audio
+        || !Number.isFinite(audio.duration)
+        || audio.duration <= 0
+      ) return
+      const spokenLength = text.length - speechStart
+      const progress = Math.min(1, Math.max(0, audio.currentTime / audio.duration))
+      const characterIndex = speechStart + Math.min(spokenLength - 1, Math.floor(progress * spokenLength))
+      highlightAudiobookWord(active, transcriptOffset + characterIndex)
+    }
+    audio.onended = () => {
+      if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
+      clearAudiobookAudio(session)
+      session.currentCharIndex = 0
+      advanceAudiobookPage(active, generation).catch((error) => failAudiobookPlayback(active, error))
+    }
+    audio.onerror = () => {
+      if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
+      failAudiobookPlayback(active, new Error('The generated Gemini audio could not be played.'))
+    }
+    session.message = session.status === 'playing'
+      ? 'Reading this page aloud.'
+      : 'Gemini audio is ready. Press play to start.'
+    renderAudiobookPlayer(active)
+    if (session.status === 'playing') playGeminiAudiobookAudio(active, generation, audio)
+  } catch (error) {
+    if (!isCurrentAudiobookRequest(active, generation)) return
+    if (session.audioRequest === controller) session.audioRequest = null
+    failAudiobookPlayback(active, error)
+  }
+}
+
+function failAudiobookPlayback(active, error) {
+  const session = active.audiobook
+  session.generation += 1
+  session.status = 'idle'
+  session.autoAdvancing = false
+  session.message = error instanceof Error ? error.message : 'Audiobook playback could not continue.'
+  cancelAudiobookOutput(active)
+  console.error('[Leaf audiobook] Playback failed.', error)
+  if (state.active === active && session.open) {
+    renderAudiobookPlayer(active)
+    showToast(session.message)
+  }
+}
+
+function speakAudiobookPage(active, generation, startIndex = 0) {
+  if (!isCurrentAudiobookRequest(active, generation)) return
+  const session = active.audiobook
+  if (session.status !== 'playing') return
+  let text
+  let transcriptText
+  try {
+    text = audiobookCurrentPageText(active)
+    transcriptText = audiobookCurrentTranscriptText(active, text)
+  } catch (error) {
+    failAudiobookPlayback(active, error)
+    return
+  }
+  if (!text) {
+    renderAudiobookTranscript(active, '', 'No readable text on this page.')
+    session.message = 'No readable text on this page. Turning to the next page…'
+    renderAudiobookPlayer(active)
+    advanceAudiobookPage(active, generation).catch((error) => failAudiobookPlayback(active, error))
+    return
+  }
+
+  const sectionIndex = active.rendition.currentLocation()?.start?.index ?? null
+  let transcriptOffset = audiobookTranscriptOffset(session, text, sectionIndex)
+  if (transcriptOffset === null) {
+    renderAudiobookTranscript(active, transcriptText)
+    transcriptOffset = 0
+  }
+  session.transcriptSectionIndex = sectionIndex
+  session.speechText = text
+  session.speechTextOffset = transcriptOffset
+  const speechStart = Number.isFinite(startIndex)
+    ? Math.max(0, Math.min(Math.floor(startIndex), text.length - 1))
+    : 0
+  if (speechStart > 0) highlightAudiobookWord(active, transcriptOffset + speechStart)
+  const geminiVoice = selectedGeminiAudiobookVoice()
+  if (geminiVoice) {
+    speakGeminiAudiobookPage(active, generation, text, speechStart, transcriptOffset, geminiVoice)
+    return
+  }
+  if (!speechSynthesisAvailable()) {
+    failAudiobookPlayback(active, new Error('Browser speech is unavailable. Select a Gemini voice to use OpenRouter text-to-speech.'))
+    return
+  }
+  const utterance = new SpeechSynthesisUtterance(text.slice(speechStart))
+  const voice = selectedAudiobookVoice()
+  if (voice) utterance.voice = voice
+  utterance.rate = state.audiobookRate
+  session.utterance = utterance
+  session.message = 'Reading this page aloud.'
+  renderAudiobookPlayer(active)
+  utterance.onend = () => {
+    if (!isCurrentAudiobookRequest(active, generation)) return
+    session.utterance = null
+    advanceAudiobookPage(active, generation).catch((error) => failAudiobookPlayback(active, error))
+  }
+  utterance.onboundary = (event) => {
+    if (!isCurrentAudiobookRequest(active, generation)) return
+    highlightAudiobookWord(active, transcriptOffset + speechStart + event.charIndex)
+  }
+  utterance.onerror = (event) => {
+    if (!isCurrentAudiobookRequest(active, generation)) return
+    failAudiobookPlayback(active, new Error(`Browser speech synthesis reported "${event.error}".`))
+  }
+  try {
+    window.speechSynthesis.speak(utterance)
+  } catch (error) {
+    failAudiobookPlayback(active, error)
+  }
+}
+
+async function advanceAudiobookPage(active, generation) {
+  if (!isCurrentAudiobookRequest(active, generation)) return
+  const session = active.audiobook
+  if (session.status !== 'playing') return
+  const previousLocation = active.rendition.currentLocation()
+  session.autoAdvancing = true
+  session.message = 'Turning the page…'
+  renderAudiobookPlayer(active)
+  try {
+    await active.rendition.next()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  } catch (error) {
+    session.autoAdvancing = false
+    if (isCurrentAudiobookRequest(active, generation)) failAudiobookPlayback(active, error)
+    return
+  }
+  if (!isCurrentAudiobookRequest(active, generation)) return
+  const nextLocation = active.rendition.currentLocation()
+  session.autoAdvancing = false
+  if (
+    !nextLocation?.start?.cfi
+    || (nextLocation.start.cfi === previousLocation?.start?.cfi && nextLocation.end?.cfi === previousLocation?.end?.cfi)
+  ) {
+    session.status = 'ended'
+    session.currentCharIndex = 0
+    session.message = 'You have reached the end of the book.'
+    renderAudiobookPlayer(active)
+    return
+  }
+  session.currentCharIndex = 0
+  if (session.status !== 'playing') {
+    try {
+      const pageText = audiobookCurrentPageText(active)
+      const transcriptText = audiobookCurrentTranscriptText(active, pageText)
+      renderAudiobookTranscript(active, transcriptText, 'No readable text on this page.')
+    } catch (error) {
+      failAudiobookPlayback(active, error)
+      return
+    }
+    session.message = 'Paused.'
+    renderAudiobookPlayer(active)
+    return
+  }
+  speakAudiobookPage(active, generation)
+}
+
+function stopAudiobookPlayback(active, message = 'Playback stopped.') {
+  const session = active.audiobook
+  session.generation += 1
+  cancelAudiobookOutput(active)
+  session.autoAdvancing = false
+  session.status = 'idle'
+  session.message = message
+  renderAudiobookPlayer(active)
+}
+
+async function skipAudiobookPage(direction) {
+  const active = state.active
+  if (!active || !active.audiobook.open) return
+  const session = active.audiobook
+  const wasPlaying = session.status === 'playing'
+  const wasPaused = session.status === 'paused'
+  session.generation += 1
+  const generation = session.generation
+  cancelAudiobookOutput(active)
+  session.autoAdvancing = true
+  session.status = wasPlaying ? 'playing' : wasPaused ? 'paused' : 'idle'
+  session.message = direction === 'prev' ? 'Going to the previous page…' : 'Skipping to the next page…'
+  renderAudiobookPlayer(active)
+  const previousLocation = active.rendition.currentLocation()
+
+  try {
+    await (direction === 'prev' ? active.rendition.prev() : active.rendition.next())
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  } catch (error) {
+    session.autoAdvancing = false
+    if (isCurrentAudiobookRequest(active, generation)) failAudiobookPlayback(active, error)
+    return
+  }
+  if (!isCurrentAudiobookRequest(active, generation)) return
+
+  const nextLocation = active.rendition.currentLocation()
+  session.autoAdvancing = false
+  const changed = nextLocation?.start?.cfi
+    && (nextLocation.start.cfi !== previousLocation?.start?.cfi || nextLocation.end?.cfi !== previousLocation?.end?.cfi)
+  if (!changed && direction === 'next') {
+    session.status = 'ended'
+    session.message = 'You have reached the end of the book.'
+    renderAudiobookPlayer(active)
+    return
+  }
+  if (session.status === 'playing') {
+    speakAudiobookPage(active, generation)
+    return
+  }
+
+  try {
+    const pageText = audiobookCurrentPageText(active)
+    const transcriptText = audiobookCurrentTranscriptText(active, pageText)
+    renderAudiobookTranscript(active, transcriptText, 'No readable text on this page.')
+  } catch (error) {
+    failAudiobookPlayback(active, error)
+    return
+  }
+  const remainsPaused = session.status === 'paused'
+  session.status = remainsPaused ? 'paused' : 'idle'
+  session.message = changed
+    ? remainsPaused ? 'New page loaded. Resume when ready.' : 'New page loaded. Press play to listen.'
+    : 'You are already at the first page.'
+  renderAudiobookPlayer(active)
+}
+
+function toggleAudiobookPlayback() {
+  const active = state.active
+  if (!active || !active.audiobook.open) return
+  const session = active.audiobook
+  if (!speechSynthesisAvailable() && !selectedGeminiAudiobookVoice()) {
+    session.message = 'Select a Gemini voice to use OpenRouter text-to-speech in this browser.'
+    renderAudiobookPlayer(active)
+    return
+  }
+
+  if (session.status === 'playing') {
+    if (session.audio) session.audio.pause()
+    else if (session.utterance && speechSynthesisAvailable() && window.speechSynthesis.speaking) {
+      window.speechSynthesis.pause()
+    }
+    session.status = 'paused'
+    session.message = 'Paused.'
+    renderAudiobookPlayer(active)
+    return
+  }
+  if (session.status === 'paused') {
+    session.status = 'playing'
+    session.message = session.audioRequest ? 'Generating Gemini speech…' : 'Reading this page aloud.'
+    if (session.audio) playGeminiAudiobookAudio(active, session.generation, session.audio)
+    else if (session.utterance && speechSynthesisAvailable()) window.speechSynthesis.resume()
+    else if (!session.autoAdvancing && !session.audioRequest) {
+      speakAudiobookPage(active, session.generation, session.currentCharIndex)
+    }
+    renderAudiobookPlayer(active)
+    return
+  }
+
+  session.generation += 1
+  session.status = 'playing'
+  session.currentCharIndex = 0
+  session.message = 'Starting audiobook…'
+  renderAudiobookPlayer(active)
+  speakAudiobookPage(active, session.generation)
+}
+
+async function openAudiobookPlayer() {
+  const active = state.active
+  if (!active) return
+  setReaderSettingsOpen(false)
+  $('#toc-panel').hidden = true
+  $('#bookmark-panel').hidden = true
+  $('#bookmarks-button').setAttribute('aria-expanded', 'false')
+  const session = active.audiobook
+  session.open = true
+  session.position = ''
+  if (!speechSynthesisAvailable() && !selectedGeminiAudiobookVoice()) {
+    state.audiobookVoiceURI = `${geminiAudiobookVoicePrefix}${geminiAudiobookVoices[0]}`
+  }
+  session.message = speechSynthesisAvailable()
+    ? 'Ready to read from the current page.'
+    : 'Gemini voices are available; playback requires an OpenRouter API key.'
+  $('#audiobook-title').textContent = active.record.title
+  $('#audiobook-author').textContent = active.record.author || ''
+  $('#audiobook-player').hidden = false
+  $('#audiobook-button').setAttribute('aria-expanded', 'true')
+  $('#audiobook-background').style.backgroundImage = ''
+  $('#audiobook-cover').style.backgroundImage = ''
+  renderAudiobookVoices()
+  const location = active.rendition.currentLocation()
+  if (location?.start) updateReadingPosition(location)
+  try {
+    const pageText = audiobookCurrentPageText(active)
+    const transcriptText = audiobookCurrentTranscriptText(active, pageText)
+    renderAudiobookTranscript(active, transcriptText, 'No readable text on this page.')
+  } catch (error) {
+    console.error('[Leaf audiobook] Could not load transcript text.', error)
+    renderAudiobookTranscript(active, '', 'The current page text could not be loaded.')
+    showToast('Could not load the audiobook transcript.')
+  }
+  syncAudiobookPosition(active, location)
+  renderAudiobookPlayer(active)
+  showReaderUi()
+  $('#audiobook-close').focus()
+
+  try {
+    const coverUrl = await active.book.coverUrl()
+    if (state.active !== active || !session.open || !coverUrl) return
+    const coverImage = `url("${coverUrl}")`
+    $('#audiobook-background').style.backgroundImage = coverImage
+    $('#audiobook-cover').style.backgroundImage = coverImage
+  } catch (error) {
+    console.error('[Leaf audiobook] Could not load the book cover.', error)
+    if (state.active === active && session.open) {
+      session.message = 'Ready to read from the current page. The cover could not be loaded.'
+      renderAudiobookPlayer(active)
+      showToast('Audiobook opened without the book cover.')
+    }
+  }
+}
+
+function closeAudiobookPlayer(restoreFocus = true) {
+  const active = state.active
+  if (active) {
+    stopAudiobookPlayback(active)
+    active.audiobook.open = false
+  }
+  $('#audiobook-player').hidden = true
+  $('#audiobook-button').setAttribute('aria-expanded', 'false')
+  if (restoreFocus && active) {
+    $('#audiobook-button').focus()
+    showReaderUi()
+  }
 }
 
 function cancelBookPageCount(active) {
@@ -2634,6 +3405,7 @@ async function openBook(id) {
   if (!record) return
   clearReaderUiTimer()
   if (state.active) {
+    closeAudiobookPlayer(false)
     cancelBookPageCount(state.active)
     destroyAiStoryBackgrounds(state.active)
     state.active.rendition.destroy()
@@ -2651,7 +3423,7 @@ async function openBook(id) {
     flow: 'paginated',
     allowScriptedContent: false,
   })
-  state.active = {
+  const active = {
     book,
     rendition,
     record,
@@ -2669,10 +3441,34 @@ async function openBook(id) {
     aiBackgroundRequest: null,
     aiBackgroundRetryAfter: 0,
     aiBackgroundKeyWarningShown: false,
+    audiobook: {
+      open: false,
+      status: 'idle',
+      message: '',
+      position: '',
+      generation: 0,
+      utterance: null,
+      audio: null,
+      audioUrl: null,
+      audioRequest: null,
+      autoAdvancing: false,
+      text: '',
+      wordOffsets: [],
+      wordElements: [],
+      activeWordElement: null,
+      currentCharIndex: 0,
+      speechText: '',
+      speechTextOffset: 0,
+      transcriptSectionIndex: null,
+    },
   }
+  state.active = active
   const pageDocuments = new WeakSet()
   const readerFrame = $('#epub-frame')
   const turnPage = (direction) => {
+    if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
+      stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
+    }
     const navigation = direction === 'prev' ? rendition.prev() : rendition.next()
     navigation.catch((error) => console.error('[Leaf page-turn] Navigation failed.', error))
   }
@@ -2820,10 +3616,11 @@ function renderBookmarks() {
 function syncBookmarkButton(cfi) {
   const isBookmarked = Boolean(state.active && state.bookmarks.some((bookmark) => bookmark.bookId === state.active.record.id && bookmark.cfi === cfi))
   const button = $('#bookmark-current')
-  const label = isBookmarked ? 'Remove bookmark from this page' : 'Bookmark this page'
+  const label = isBookmarked ? 'Remove bookmark' : 'Add bookmark'
   button.title = label
   button.setAttribute('aria-label', label)
   button.setAttribute('aria-pressed', String(isBookmarked))
+  button.querySelector('span').textContent = label
 }
 
 async function toggleBookmark() {
@@ -2887,6 +3684,7 @@ function updateReadingPosition(location) {
   $('#progress-fill').style.width = `${percentage ?? 0}%`
   $('#progress-label').textContent = percentage === null ? '—%' : `${percentage.toFixed(percentageDigits)}%`
   $('#chapter-label').textContent = location.start.href?.split('#')[0]?.split('/').pop()?.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') || 'Reading'
+  syncAudiobookPosition(state.active, location)
   syncBookmarkButton(location.start.cfi)
   if (state.readerPreferences.theme === aiStoryReaderTheme) ensureAiStoryBackground(state.active, location)
   clearTimeout(saveTimer)
@@ -3045,6 +3843,7 @@ function applyRenditionReaderTheme(rendition, preferences) {
 
 function closeReader() {
   clearReaderUiTimer()
+  closeAudiobookPlayer(false)
   if (state.active) {
     cancelBookPageCount(state.active)
     destroyAiStoryBackgrounds(state.active)
@@ -3067,7 +3866,7 @@ function showReaderUi() {
 }
 
 function readerNavigationPanelOpen() {
-  return !$('#reader-settings').hidden || !$('#toc-panel').hidden || !$('#bookmark-panel').hidden
+  return !$('#reader-settings').hidden || !$('#toc-panel').hidden || !$('#bookmark-panel').hidden || !$('#audiobook-player').hidden
 }
 
 function scheduleReaderUiHide() {
@@ -3101,14 +3900,10 @@ $('#delete-writer-draft').addEventListener('click', () => deleteSelectedWriterDr
 $('#wizard-back').addEventListener('click', returnToPreviousWriterStep)
 $('#wizard-next').addEventListener('click', continueWriterWorkflow)
 $('#revise-outline').addEventListener('click', () => reviseOutline())
-$('#generate-chapter').addEventListener('click', () => {
-  const chapter = state.writer.chapters[state.writer.currentChapter]
-  if (typeof chapter?.undoContent === 'string') undoGeneratedChapter()
-  else requestDraft('chapter')
-})
+$('#generate-chapter').addEventListener('click', () => requestDraft('chapter'))
+$('#undo-chapter').addEventListener('click', undoGeneratedChapter)
 $('#remove-chapter').addEventListener('click', removeCurrentChapter)
-$('#copy-draft').addEventListener('click', () => handleWriterBookSave(true))
-$('#save-draft').addEventListener('click', () => handleWriterBookSave(false))
+$('#save-draft').addEventListener('click', handleWriterBookSave)
 $('#toggle-key').addEventListener('click', (event) => {
   const input = $('#openrouter-key')
   const visible = input.type === 'password'
@@ -3200,7 +3995,6 @@ $('#book-author').addEventListener('input', () => {
   updateCoverTitleOverlay()
   scheduleWriterAutosave()
 })
-$('#auto-fill-chapters').addEventListener('change', scheduleWriterAutosave)
 $('#cover-art-style').addEventListener('change', scheduleWriterAutosave)
 $('#cover-mood').addEventListener('change', scheduleWriterAutosave)
 $('#cover-input').addEventListener('change', (event) => selectCover(event.target.files[0]))
@@ -3344,6 +4138,30 @@ $('#bookmark-list').addEventListener('click', async (event) => {
 })
 $('#reader-settings-button').addEventListener('click', () => setReaderSettingsOpen($('#reader-settings').hidden))
 $('#close-reader-settings').addEventListener('click', () => setReaderSettingsOpen(false))
+$('#audiobook-button').addEventListener('click', () => {
+  openAudiobookPlayer().catch((error) => {
+    console.error('[Leaf audiobook] Could not open the player.', error)
+    showToast('The audiobook player could not be opened.')
+  })
+})
+$('#audiobook-close').addEventListener('click', () => closeAudiobookPlayer())
+$('#audiobook-toggle').addEventListener('click', toggleAudiobookPlayback)
+$('#audiobook-skip-back').addEventListener('click', () => {
+  skipAudiobookPage('prev').catch((error) => {
+    if (state.active) failAudiobookPlayback(state.active, error)
+  })
+})
+$('#audiobook-skip-forward').addEventListener('click', () => {
+  skipAudiobookPage('next').catch((error) => {
+    if (state.active) failAudiobookPlayback(state.active, error)
+  })
+})
+$('#audiobook-voice-cycle').addEventListener('click', cycleAudiobookVoice)
+$('#audiobook-speed-cycle').addEventListener('click', cycleAudiobookRate)
+if (speechSynthesisAvailable()) {
+  renderAudiobookVoices()
+  window.speechSynthesis.addEventListener('voiceschanged', renderAudiobookVoices)
+}
 $('#reset-reader-settings').addEventListener('click', () => {
   if (state.active) {
     cancelAiStoryBackground(state.active)
@@ -3398,6 +4216,10 @@ $('#chapter-list').addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (!state.active) return
   if (event.key !== 'Escape') return
+  if (!$('#audiobook-player').hidden) {
+    closeAudiobookPlayer()
+    return
+  }
   if (!$('#reader-settings').hidden) setReaderSettingsOpen(false)
   else closeReader()
 })
