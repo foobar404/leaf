@@ -133,6 +133,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .reader-main { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .reader-stage { position: relative; z-index: 0; min-width: 0; min-height: 0; flex: 1; display: flex; align-items: stretch; justify-content: center; overflow: hidden; padding: 10px clamp(8px, 1vw, 16px) 5px; }
 .epub-frame { width: auto; max-width: none; min-width: 0; min-height: 0; max-height: 100%; flex: 1 1 0; overflow: hidden; border: 0; border-radius: 0; background: var(--reader-paper-background, #fbf7f2); box-shadow: none; }
+.reader-touch-overlay { display: none; }
 .app-shell--reading .epub-frame, .app-shell--reading .epub-frame iframe { background: transparent; }
 .epub-frame iframe { border: 0; }
 .reader-selection-menu { position: absolute; z-index: 12; width: min(340px, calc(100% - 24px)); display: grid; gap: 10px; padding: 14px; border: 1px solid #e5d8d1; border-radius: 18px; background: #fffdf9f5; box-shadow: 0 20px 48px #241b2245, 0 4px 12px #241b2226; color: #393137; backdrop-filter: blur(14px); }
@@ -479,6 +480,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 @media (hover: none), (pointer: coarse) {
   .book-card__action { width: 38px; height: 38px; }
+  .reader-touch-overlay { position: absolute; z-index: 1; inset: 0; display: block; background: transparent; touch-action: none; }
 }
 
 @media (max-width: 420px) {

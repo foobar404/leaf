@@ -75,6 +75,7 @@ const iconSet = {
 }
 
 const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
+const readerPageTurnThrottleMs = 300
 const aiStoryReaderTheme = 'ai-story-background'
 const chapterDraftChunkCharacterLimit = 8000
 const chapterDraftChunkWordLimit = 1000
@@ -696,6 +697,7 @@ app.innerHTML = `
           <div class="reader-main">
             <div class="reader-stage">
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
+              <div class="reader-touch-overlay" aria-hidden="true"></div>
             </div>
             <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label">A quiet moment</span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
           </div>
@@ -2784,10 +2786,17 @@ async function lookupReaderSelection(action) {
   }
 }
 
+function allowReaderAction(active) {
+  const now = Date.now()
+  if (now - active.lastReaderActionAt < readerPageTurnThrottleMs) return false
+  active.lastReaderActionAt = now
+  return true
+}
+
 function turnActivePage(direction) {
   const active = state.active
   const rendition = active?.rendition
-  if (!rendition) return
+  if (!rendition || !allowReaderAction(active)) return
   closeReaderSelectionMenu(active)
   if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
     stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
@@ -3865,6 +3874,7 @@ async function openBook(id) {
     book,
     rendition,
     record,
+    lastReaderActionAt: 0,
     pageCountOffsets: null,
     pageCountTotal: null,
     pageCountToken: 0,
@@ -4406,7 +4416,8 @@ function showReaderUi() {
 
 function toggleReaderUi() {
   const screen = $('#reader-screen')
-  if (!state.active || screen.hidden) return
+  const active = state.active
+  if (!active || screen.hidden || !allowReaderAction(active)) return
   if (screen.classList.contains('reader-screen--ui-hidden')) {
     screen.classList.remove('reader-screen--ui-hidden')
     scheduleReaderUiHide()
@@ -4615,6 +4626,7 @@ $('#reader-selection-menu').addEventListener('click', (event) => {
   else closeReaderSelectionMenu()
 })
 const readerStage = $('.reader-stage')
+const readerTouchOverlay = $('.reader-touch-overlay')
 let readerTouchStart = null
 let suppressedReaderTap = null
 readerStage.addEventListener('reader-gesture', (event) => {
@@ -4692,7 +4704,7 @@ readerStage.addEventListener('click', (event) => {
   event.stopImmediatePropagation()
 }, true)
 readerStage.addEventListener('click', (event) => {
-  if (event.target instanceof HTMLIFrameElement) return
+  if (event.target instanceof HTMLIFrameElement || event.target.closest('.reader-touch-overlay')) return
   if (event.pointerType && event.pointerType !== 'mouse') return
   if (event.button !== 0 || event.detail === 0) return
   const bounds = readerStage.getBoundingClientRect()
@@ -4703,6 +4715,12 @@ readerStage.addEventListener('click', (event) => {
       width: readerStage.clientWidth,
     },
   }))
+})
+readerTouchOverlay.addEventListener('click', (event) => {
+  if (event.button !== 0) return
+  const bounds = readerStage.getBoundingClientRect()
+  const x = event.detail === 0 ? readerStage.clientWidth / 2 : event.clientX - bounds.left
+  handleReaderTap(x, readerStage.clientWidth)
 })
 $('#toc-button').addEventListener('click', () => {
   $('#toc-panel').hidden = !$('#toc-panel').hidden
