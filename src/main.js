@@ -699,7 +699,7 @@ app.innerHTML = `
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
               <div class="reader-touch-overlay" aria-hidden="true"></div>
             </div>
-            <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label">A quiet moment</span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
+            <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label"><span class="reader-footer__chapter-name" id="chapter-name-label">A quiet moment</span><span class="reader-footer__chapter-remaining" id="chapter-remaining-label" hidden></span></span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span><span class="reading-progress__markers" id="chapter-progress-markers" aria-hidden="true"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
           </div>
         </div>
         <div class="reader-selection-menu" id="reader-selection-menu" role="dialog" aria-label="Selected text actions" aria-busy="false" hidden>
@@ -742,8 +742,11 @@ app.innerHTML = `
           </div>
           <span class="audiobook-player__page-count" id="audiobook-page-count">— / —</span>
           <div class="audiobook-player__options">
-            <button class="audiobook-player__option-button audiobook-player__option-button--voice" type="button" id="audiobook-voice-cycle" aria-label="Voice: Browser default. Click to change voice." title="Voice: Browser default. Click to change voice."><i data-lucide="headphones" aria-hidden="true"></i><span id="audiobook-voice-value">Browser default</span></button>
-            <button class="audiobook-player__option-button audiobook-player__option-button--speed" type="button" id="audiobook-speed-cycle" aria-label="Reading speed: 1.0 times. Click to change speed." title="Reading speed: 1.0×. Click to change speed."><i data-lucide="gauge" aria-hidden="true"></i><span id="audiobook-speed-value">1.0×</span></button>
+            <div class="audiobook-player__voice-picker" id="audiobook-voice-picker">
+              <button class="audiobook-player__option-button audiobook-player__option-button--voice" type="button" id="audiobook-voice-select" aria-label="Voice: Browser default. Choose voice." title="Voice: Browser default. Choose voice." aria-haspopup="menu" aria-expanded="false" aria-controls="audiobook-voice-menu"><i data-lucide="headphones" aria-hidden="true"></i><span id="audiobook-voice-value">Browser default</span></button>
+              <div class="audiobook-player__voice-menu" id="audiobook-voice-menu" role="menu" aria-label="Audiobook voices" hidden></div>
+            </div>
+            <button class="audiobook-player__option-button audiobook-player__option-button--speed" type="button" id="audiobook-speed-cycle" aria-label="Reading speed: 1.0 times. Left half decreases; right half increases. Arrow keys adjust speed." aria-keyshortcuts="ArrowLeft ArrowRight" title="Reading speed: 1.0×. Left half decreases; right half increases."><i data-lucide="gauge" aria-hidden="true"></i><span id="audiobook-speed-value">1.0×</span><i class="audiobook-player__speed-arrow audiobook-player__speed-arrow--decrease" data-lucide="chevron-left" aria-hidden="true"></i><i class="audiobook-player__speed-arrow audiobook-player__speed-arrow--increase" data-lucide="chevron-right" aria-hidden="true"></i></button>
           </div>
         </footer>
       </div>
@@ -2824,6 +2827,9 @@ function speechVoiceKey(voice) {
 const audiobookRates = Array.from({ length: 16 }, (_, index) => (index + 5) / 10)
 const browserAudiobookVoicePrefix = 'browser:'
 const geminiAudiobookVoicePrefix = 'gemini:'
+const geminiAudiobookPagesPerChunk = 3
+const geminiAudiobookPrefetchRetries = 3
+const geminiAudiobookMaxCharactersPerChunk = 2000
 const geminiAudiobookVoices = [
   'Zephyr',
   'Puck',
@@ -2881,6 +2887,19 @@ function renderAudiobookVoices() {
     state.audiobookVoiceURI = ''
   }
   renderAudiobookOptions()
+  const menu = $('#audiobook-voice-menu')
+  if (!menu.hidden) {
+    const focusedOption = document.activeElement?.closest?.('[data-voice-uri]')
+    const focusedVoiceURI = focusedOption?.dataset.voiceUri
+    renderAudiobookVoiceMenu()
+    if (focusedVoiceURI !== undefined) {
+      const options = [...menu.querySelectorAll('[role="menuitemradio"]')]
+      const nextFocus = options.find((option) => option.dataset.voiceUri === focusedVoiceURI)
+        || options.find((option) => option.getAttribute('aria-checked') === 'true')
+        || options[0]
+      nextFocus?.focus()
+    }
+  }
 }
 
 function selectedAudiobookVoice() {
@@ -2905,20 +2924,97 @@ function audiobookVoiceLabel() {
 }
 
 function renderAudiobookOptions() {
-  const voiceButton = $('#audiobook-voice-cycle')
+  const voiceButton = $('#audiobook-voice-select')
   const voiceLabel = audiobookVoiceLabel()
-  const voiceLoading = Boolean(state.active?.audiobook.audioRequest)
+  const voiceLoading = Boolean(state.active?.audiobook.audioRequest || state.active?.audiobook.prefetchRequest)
   voiceButton.querySelector('span').textContent = voiceLabel
-  voiceButton.setAttribute('aria-label', `Voice: ${voiceLabel}. Click to change voice.`)
-  voiceButton.title = `Voice: ${voiceLabel}. Click to change voice.`
+  voiceButton.setAttribute('aria-label', `Voice: ${voiceLabel}. Open voice menu.`)
+  voiceButton.title = `Voice: ${voiceLabel}. Choose voice.`
   voiceButton.classList.toggle('audiobook-player__option-button--loading', voiceLoading)
   voiceButton.setAttribute('aria-busy', String(voiceLoading))
 
   const speed = `${state.audiobookRate.toFixed(1)}×`
   const speedButton = $('#audiobook-speed-cycle')
   speedButton.querySelector('span').textContent = speed
-  speedButton.setAttribute('aria-label', `Reading speed: ${state.audiobookRate.toFixed(1)} times. Click to change speed.`)
-  speedButton.title = `Reading speed: ${state.audiobookRate.toFixed(1)} times. Click to change speed.`
+  speedButton.setAttribute(
+    'aria-label',
+    `Reading speed: ${state.audiobookRate.toFixed(1)} times. Left half decreases; right half increases. Arrow keys adjust speed.`,
+  )
+  speedButton.title = `Reading speed: ${state.audiobookRate.toFixed(1)}×. Left half decreases; right half increases.`
+}
+
+function audiobookVoiceGroups() {
+  const groups = []
+  if (speechSynthesisAvailable()) {
+    groups.push({
+      label: 'Browser voices',
+      choices: [
+        { uri: '', label: 'Browser default' },
+        ...availableAudiobookVoices().map((voice) => ({
+          uri: `${browserAudiobookVoicePrefix}${speechVoiceKey(voice)}`,
+          label: voice.lang ? `${voice.name} (${voice.lang})` : voice.name,
+        })),
+      ],
+    })
+  }
+  groups.push({
+    label: 'Gemini voices · OpenRouter',
+    choices: geminiAudiobookVoices.map((voice) => ({
+      uri: `${geminiAudiobookVoicePrefix}${voice}`,
+      label: voice,
+    })),
+  })
+  return groups
+}
+
+function renderAudiobookVoiceMenu() {
+  const menu = $('#audiobook-voice-menu')
+  menu.replaceChildren()
+  for (const group of audiobookVoiceGroups()) {
+    const heading = document.createElement('div')
+    heading.className = 'audiobook-player__voice-menu-heading'
+    heading.setAttribute('role', 'presentation')
+    heading.textContent = group.label
+    menu.append(heading)
+
+    for (const choice of group.choices) {
+      const option = document.createElement('button')
+      option.type = 'button'
+      option.className = 'audiobook-player__voice-menu-option'
+      option.setAttribute('role', 'menuitemradio')
+      option.setAttribute('aria-checked', String(choice.uri === state.audiobookVoiceURI))
+      option.dataset.voiceUri = choice.uri
+      option.textContent = choice.label
+      option.addEventListener('click', () => {
+        closeAudiobookVoiceMenu(true)
+        if (choice.uri !== state.audiobookVoiceURI) setAudiobookVoice(choice.uri)
+      })
+      menu.append(option)
+    }
+  }
+}
+
+function openAudiobookVoiceMenu() {
+  const button = $('#audiobook-voice-select')
+  const menu = $('#audiobook-voice-menu')
+  renderAudiobookVoiceMenu()
+  menu.hidden = false
+  button.setAttribute('aria-expanded', 'true')
+  const selectedOption = [...menu.querySelectorAll('[role="menuitemradio"]')]
+    .find((option) => option.getAttribute('aria-checked') === 'true')
+  ;(selectedOption || menu.querySelector('[role="menuitemradio"]'))?.focus()
+}
+
+function closeAudiobookVoiceMenu(restoreFocus = false) {
+  $('#audiobook-voice-menu').hidden = true
+  const button = $('#audiobook-voice-select')
+  button.setAttribute('aria-expanded', 'false')
+  if (restoreFocus) button.focus()
+}
+
+function toggleAudiobookVoiceMenu() {
+  if ($('#audiobook-voice-menu').hidden) openAudiobookVoiceMenu()
+  else closeAudiobookVoiceMenu(true)
 }
 
 function setAudiobookVoice(voiceURI) {
@@ -2944,7 +3040,7 @@ function setAudiobookVoice(voiceURI) {
   }
 
   const wasPlaying = session.status === 'playing'
-  const startIndex = session.currentCharIndex
+  const startIndex = audiobookResumeCharIndex(session)
   session.generation += 1
   const generation = session.generation
   cancelAudiobookOutput(active)
@@ -2955,20 +3051,11 @@ function setAudiobookVoice(voiceURI) {
   else renderAudiobookPlayer(active)
 }
 
-function cycleAudiobookVoice() {
-  const choices = [
-    '',
-    ...geminiAudiobookVoices.map((voice) => `${geminiAudiobookVoicePrefix}${voice}`),
-    ...availableAudiobookVoices().map((voice) => `${browserAudiobookVoicePrefix}${speechVoiceKey(voice)}`),
-  ]
-  const currentIndex = choices.indexOf(state.audiobookVoiceURI)
-  const nextIndex = (currentIndex + 1) % choices.length
-  setAudiobookVoice(choices[nextIndex])
-}
-
-function cycleAudiobookRate() {
+function adjustAudiobookRate(direction) {
   const currentIndex = audiobookRates.findIndex((rate) => Math.abs(rate - state.audiobookRate) < 0.001)
-  state.audiobookRate = audiobookRates[(currentIndex + 1) % audiobookRates.length]
+  const nextIndex = Math.max(0, Math.min(audiobookRates.length - 1, currentIndex + direction))
+  if (nextIndex === currentIndex) return
+  state.audiobookRate = audiobookRates[nextIndex]
   const active = state.active
   if (!active?.audiobook.open) {
     renderAudiobookOptions()
@@ -3038,6 +3125,13 @@ function renderAudiobookTranscript(active, text, placeholder = 'Press play to re
   transcript.scrollTop = 0
 }
 
+function audiobookResumeCharIndex(session) {
+  const currentPage = session.geminiChunk?.pages[session.visibleChunkPageIndex]
+  return currentPage?.speechStart === null || currentPage?.speechStart === undefined
+    ? session.currentCharIndex
+    : Math.max(0, session.currentCharIndex - currentPage.speechStart)
+}
+
 function audiobookTranscriptOffset(session, speechText, sectionIndex) {
   if (sectionIndex === null || session.transcriptSectionIndex !== sectionIndex) return null
   if (session.speechText === speechText) return session.speechTextOffset
@@ -3076,7 +3170,7 @@ function highlightAudiobookWord(active, charIndex) {
 
 function syncAudiobookPosition(active, location = active.rendition.currentLocation()) {
   if (!active.audiobook.open) return
-  const chapter = $('#chapter-label').textContent.trim()
+  const chapter = $('#chapter-name-label').textContent.trim()
   const page = $('#page-count-label').textContent.trim()
   const displayedPage = Number(location?.start?.displayed?.page)
   const displayedTotal = Number(location?.start?.displayed?.total)
@@ -3153,14 +3247,29 @@ function cancelAudiobookOutput(active) {
   const hadUtterance = Boolean(session.utterance)
   session.audioRequest?.abort()
   session.audioRequest = null
+  session.prefetchRequest?.controller.abort()
+  session.prefetchRequest = null
+  session.prefetchedChunk = null
+  session.prefetchError = null
+  session.geminiChunk = null
+  session.geminiVoice = ''
+  session.visibleChunkPageIndex = 0
   clearAudiobookAudio(session)
   if (hadUtterance && speechSynthesisAvailable()) window.speechSynthesis.cancel()
   session.utterance = null
 }
 
 function playGeminiAudiobookAudio(active, generation, audio) {
+  const session = active.audiobook
+  if (session.geminiChunk) {
+    maybeStartGeminiAudiobookPrefetch(
+      active,
+      generation,
+      session.geminiChunk,
+      session.currentCharIndex,
+    )
+  }
   audio.play().catch((error) => {
-    const session = active.audiobook
     if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
     if (error?.name === 'NotAllowedError') {
       session.status = 'paused'
@@ -3173,68 +3282,352 @@ function playGeminiAudiobookAudio(active, generation, audio) {
   })
 }
 
-async function speakGeminiAudiobookPage(active, generation, text, speechStart, transcriptOffset, voice) {
+function createGeminiAudiobookChunk(pages) {
+  let text = ''
+  const chunkPages = pages.slice(0, geminiAudiobookPagesPerChunk).map((page) => ({
+    ...page,
+    speechStart: null,
+  }))
+  for (const page of chunkPages) {
+    if (!page.text) continue
+    const separator = text ? ' ' : ''
+    page.speechStart = text.length + separator.length
+    text += `${separator}${page.text}`
+  }
+  return {
+    pages: chunkPages,
+    text,
+    nextPageCfi: pages[geminiAudiobookPagesPerChunk]?.cfi || null,
+    nextSpeechStart: 0,
+  }
+}
+
+function geminiAudiobookPageIndexAt(chunk, charIndex) {
+  let pageIndex = 0
+  for (let index = 0; index < chunk.pages.length; index += 1) {
+    if (Number.isInteger(chunk.pages[index].speechStart) && chunk.pages[index].speechStart <= charIndex) {
+      pageIndex = index
+    }
+  }
+  return pageIndex
+}
+
+function geminiAudiobookPositionAt(chunk, charIndex) {
+  const page = chunk.pages.find((item) => (
+    Number.isInteger(item.speechStart)
+    && charIndex < item.speechStart + item.text.length
+  ))
+  if (page) {
+    return {
+      cfi: page.cfi,
+      speechStart: Math.max(0, charIndex - page.speechStart),
+    }
+  }
+  return { cfi: chunk.nextPageCfi, speechStart: chunk.nextSpeechStart || 0 }
+}
+
+function geminiAudiobookSpeechEnd(text, start) {
+  let end = start
+  let characterCount = 0
+  while (end < text.length && characterCount < geminiAudiobookMaxCharactersPerChunk) {
+    end += text.codePointAt(end) > 0xffff ? 2 : 1
+    characterCount += 1
+  }
+  if (end < text.length) {
+    const wordBoundary = text.lastIndexOf(' ', end)
+    if (wordBoundary > start) end = wordBoundary
+  }
+  return end
+}
+
+function maybeStartGeminiAudiobookPrefetch(active, generation, chunk, charIndex) {
+  const session = active.audiobook
+  if (session.status !== 'playing' || session.geminiChunk !== chunk) return
+  const spokenPageIndexes = chunk.pages.reduce((indexes, page, index) => {
+    if (
+      Number.isInteger(page.speechStart)
+      && page.speechStart < chunk.speechEnd
+      && page.speechStart + page.text.length > chunk.speechStart
+    ) indexes.push(index)
+    return indexes
+  }, [])
+  if (!spokenPageIndexes.length) return
+
+  if (spokenPageIndexes.length === 1) {
+    const halfwayPoint = chunk.speechStart + Math.floor((chunk.speechEnd - chunk.speechStart) / 2)
+    if (charIndex >= halfwayPoint) {
+      startGeminiAudiobookPrefetch(active, generation, chunk, session.geminiVoice)
+    }
+    return
+  }
+
+  const prefetchPageIndex = spokenPageIndexes[Math.max(0, spokenPageIndexes.length - 2)]
+  if (geminiAudiobookPageIndexAt(chunk, charIndex) >= prefetchPageIndex) {
+    startGeminiAudiobookPrefetch(active, generation, chunk, session.geminiVoice)
+  }
+}
+
+function syncGeminiAudiobookReaderPage(active, generation, chunk, charIndex) {
+  const session = active.audiobook
+  const pageIndex = geminiAudiobookPageIndexAt(chunk, charIndex)
+  maybeStartGeminiAudiobookPrefetch(active, generation, chunk, charIndex)
+  if (pageIndex <= session.visibleChunkPageIndex) return
+  const page = chunk.pages[pageIndex]
+  if (!page?.cfi) return
+  session.visibleChunkPageIndex = pageIndex
+  active.rendition.display(page.cfi).catch((error) => {
+    if (isCurrentAudiobookRequest(active, generation) && session.geminiChunk === chunk) {
+      failAudiobookPlayback(active, error)
+    }
+  })
+}
+
+async function generateGeminiAudiobookChunk(
+  active,
+  startCfi,
+  voice,
+  controller,
+  isCurrent,
+  speechStart = 0,
+  speechRetries = 1,
+) {
+  let timedOut = false
+  const timeoutMessage = 'Gemini speech generation timed out. Check your connection and try again.'
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 90_000)
+  try {
+    let pageCfi = startCfi
+    while (pageCfi && isCurrent()) {
+      const pages = await collectReaderPageRanges(
+        active,
+        pageCfi,
+        geminiAudiobookPagesPerChunk + 1,
+        isCurrent,
+      )
+      if (!isCurrent()) {
+        if (timedOut) throw new Error(timeoutMessage)
+        return null
+      }
+      if (!pages.length) return null
+
+      const chunk = createGeminiAudiobookChunk(pages)
+      if (!chunk.text) {
+        pageCfi = chunk.nextPageCfi
+        speechStart = 0
+        continue
+      }
+
+      const start = Math.min(Math.max(0, Math.floor(speechStart)), chunk.text.length - 1)
+      const end = geminiAudiobookSpeechEnd(chunk.text, start)
+      if (end <= start) throw new Error('Could not split Gemini speech text into a valid chunk.')
+      const nextPosition = end < chunk.text.length
+        ? geminiAudiobookPositionAt(chunk, end)
+        : { cfi: chunk.nextPageCfi, speechStart: chunk.nextSpeechStart || 0 }
+      chunk.speechStart = start
+      chunk.speechEnd = end
+      chunk.nextPageCfi = nextPosition.cfi
+      chunk.nextSpeechStart = nextPosition.speechStart
+      const audioBlob = await synthesizeOpenRouterSpeech({
+        apiKey: openRouterApiKeyForAudiobook(),
+        input: chunk.text.slice(start, end),
+        voice,
+        signal: controller.signal,
+        maxRetries: speechRetries,
+      })
+      if (!isCurrent()) {
+        if (timedOut) throw new Error(timeoutMessage)
+        return null
+      }
+      return { chunk, audioBlob, voice, speechStart: start, speechEnd: end }
+    }
+    if (timedOut) throw new Error(timeoutMessage)
+    return null
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(timeoutMessage)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function startGeminiAudiobookPrefetch(active, generation, chunk, voice) {
+  const session = active.audiobook
+  if (!chunk.nextPageCfi || session.prefetchedChunk || session.prefetchRequest || !voice) return
+
+  const request = { controller: new AbortController(), promise: null }
+  session.prefetchError = null
+  session.prefetchRequest = request
+  const isCurrent = () => isCurrentAudiobookRequest(active, generation)
+    && session.prefetchRequest === request
+    && !request.controller.signal.aborted
+  request.promise = generateGeminiAudiobookChunk(
+    active,
+    chunk.nextPageCfi,
+    voice,
+    request.controller,
+    isCurrent,
+    chunk.nextSpeechStart || 0,
+    geminiAudiobookPrefetchRetries,
+  ).then((prepared) => {
+    if (!isCurrent()) return null
+    session.prefetchRequest = null
+    session.prefetchedChunk = prepared
+    return prepared
+  }).catch((error) => {
+    if (!isCurrentAudiobookRequest(active, generation) || session.prefetchRequest !== request) return null
+    session.prefetchRequest = null
+    session.prefetchError = error
+    console.error('[Leaf audiobook] Could not prefetch Gemini speech.', error)
+    return null
+  }).finally(() => {
+    if (isCurrentAudiobookRequest(active, generation)) renderAudiobookPlayer(active)
+  })
+  renderAudiobookPlayer(active)
+}
+
+function installGeminiAudiobookChunk(active, generation, prepared) {
+  const session = active.audiobook
+  if (!isCurrentAudiobookRequest(active, generation)) return
+  const { chunk, audioBlob, voice, speechStart, speechEnd } = prepared
+  session.geminiChunk = chunk
+  session.geminiVoice = voice
+  session.visibleChunkPageIndex = geminiAudiobookPageIndexAt(chunk, speechStart)
+  renderAudiobookTranscript(active, chunk.text)
+  session.speechText = chunk.text
+  session.speechTextOffset = 0
+  session.currentCharIndex = speechStart
+  if (speechStart > 0) highlightAudiobookWord(active, speechStart)
+  const initialPage = chunk.pages[session.visibleChunkPageIndex]
+  if (initialPage?.cfi && active.rendition.currentLocation()?.start?.cfi !== initialPage.cfi) {
+    active.rendition.display(initialPage.cfi).catch((error) => {
+      if (isCurrentAudiobookRequest(active, generation) && session.geminiChunk === chunk) {
+        failAudiobookPlayback(active, error)
+      }
+    })
+  }
+
+  const audioUrl = URL.createObjectURL(audioBlob)
+  const audio = new Audio(audioUrl)
+  session.audioUrl = audioUrl
+  session.audio = audio
+  audio.preload = 'auto'
+  audio.playbackRate = state.audiobookRate
+  audio.ontimeupdate = () => {
+    if (
+      !isCurrentAudiobookRequest(active, generation)
+      || session.audio !== audio
+      || !Number.isFinite(audio.duration)
+      || audio.duration <= 0
+    ) return
+    const spokenLength = speechEnd - speechStart
+    const progress = Math.min(1, Math.max(0, audio.currentTime / audio.duration))
+    const characterIndex = speechStart + Math.min(spokenLength - 1, Math.floor(progress * spokenLength))
+    session.currentCharIndex = characterIndex
+    highlightAudiobookWord(active, characterIndex)
+    syncGeminiAudiobookReaderPage(active, generation, chunk, characterIndex)
+  }
+  audio.onended = () => {
+    if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
+    clearAudiobookAudio(session)
+    advanceGeminiAudiobookChunk(active, generation).catch((error) => failAudiobookPlayback(active, error))
+  }
+  audio.onerror = () => {
+    if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
+    failAudiobookPlayback(active, new Error('The generated Gemini audio could not be played.'))
+  }
+  session.message = session.status === 'playing'
+    ? 'Reading this page aloud.'
+    : 'Gemini audio is ready. Press play to start.'
+  renderAudiobookPlayer(active)
+  if (session.status === 'playing') playGeminiAudiobookAudio(active, generation, audio)
+}
+
+async function advanceGeminiAudiobookChunk(active, generation) {
+  const session = active.audiobook
+  const currentChunk = session.geminiChunk
+  if (!isCurrentAudiobookRequest(active, generation) || !currentChunk) return
+  if (!currentChunk.nextPageCfi) {
+    const lastSpokenPage = [...currentChunk.pages].reverse().find((page) => (
+      Number.isInteger(page.speechStart)
+      && page.speechStart < currentChunk.speechEnd
+      && page.speechStart + page.text.length > currentChunk.speechStart
+    ))
+    if (lastSpokenPage?.cfi && active.rendition.currentLocation()?.start?.cfi !== lastSpokenPage.cfi) {
+      active.rendition.display(lastSpokenPage.cfi).catch((error) => {
+        if (isCurrentAudiobookRequest(active, generation) && session.geminiChunk === currentChunk) {
+          failAudiobookPlayback(active, error)
+        }
+      })
+    }
+    session.status = 'ended'
+    session.currentCharIndex = 0
+    session.message = 'You have reached the end of the book.'
+    renderAudiobookPlayer(active)
+    return
+  }
+
+  let prepared = session.prefetchedChunk
+  if (!prepared && !session.prefetchRequest && !session.prefetchError) {
+    startGeminiAudiobookPrefetch(active, generation, currentChunk, session.geminiVoice)
+  }
+  if (!prepared && session.prefetchRequest) {
+    session.message = 'Preparing the next Gemini audio chunk…'
+    renderAudiobookPlayer(active)
+    prepared = await session.prefetchRequest.promise
+  }
+  if (!isCurrentAudiobookRequest(active, generation)) return
+  if (!prepared) {
+    if (session.prefetchError) throw session.prefetchError
+    session.status = 'ended'
+    session.currentCharIndex = 0
+    session.message = 'You have reached the end of the book.'
+    renderAudiobookPlayer(active)
+    return
+  }
+
+  session.prefetchedChunk = null
+  session.prefetchError = null
+  installGeminiAudiobookChunk(active, generation, prepared)
+}
+
+function speakGeminiAudiobookChunk(active, generation, speechStart, voice) {
   const session = active.audiobook
   const controller = new AbortController()
   session.audioRequest = controller
   session.message = 'Generating Gemini speech…'
   renderAudiobookPlayer(active)
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, 45_000)
-  try {
-    const audioBlob = await synthesizeOpenRouterSpeech({
-      apiKey: openRouterApiKeyForAudiobook(),
-      input: text.slice(speechStart),
-      voice,
-      signal: controller.signal,
-    })
-    if (!isCurrentAudiobookRequest(active, generation) || session.audioRequest !== controller) return
+  const location = active.rendition.currentLocation()
+  const startCfi = location?.start?.cfi
+  if (!startCfi) {
     session.audioRequest = null
-    const audioUrl = URL.createObjectURL(audioBlob)
-    const audio = new Audio(audioUrl)
-    session.audioUrl = audioUrl
-    session.audio = audio
-    audio.preload = 'auto'
-    audio.playbackRate = state.audiobookRate
-    audio.ontimeupdate = () => {
-      if (
-        !isCurrentAudiobookRequest(active, generation)
-        || session.audio !== audio
-        || !Number.isFinite(audio.duration)
-        || audio.duration <= 0
-      ) return
-      const spokenLength = text.length - speechStart
-      const progress = Math.min(1, Math.max(0, audio.currentTime / audio.duration))
-      const characterIndex = speechStart + Math.min(spokenLength - 1, Math.floor(progress * spokenLength))
-      highlightAudiobookWord(active, transcriptOffset + characterIndex)
-    }
-    audio.onended = () => {
-      if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
-      clearAudiobookAudio(session)
-      session.currentCharIndex = 0
-      advanceAudiobookPage(active, generation).catch((error) => failAudiobookPlayback(active, error))
-    }
-    audio.onerror = () => {
-      if (!isCurrentAudiobookRequest(active, generation) || session.audio !== audio) return
-      failAudiobookPlayback(active, new Error('The generated Gemini audio could not be played.'))
-    }
-    session.message = session.status === 'playing'
-      ? 'Reading this page aloud.'
-      : 'Gemini audio is ready. Press play to start.'
-    renderAudiobookPlayer(active)
-    if (session.status === 'playing') playGeminiAudiobookAudio(active, generation, audio)
-  } catch (error) {
-    if (!isCurrentAudiobookRequest(active, generation)) return
-    if (session.audioRequest === controller) session.audioRequest = null
-    failAudiobookPlayback(active, timedOut
-      ? new Error('Gemini speech generation timed out. Check your connection and try again.')
-      : error)
-  } finally {
-    clearTimeout(timeout)
+    failAudiobookPlayback(active, new Error('Could not locate the current page for Gemini speech.'))
+    return
   }
+
+  const isCurrent = () => isCurrentAudiobookRequest(active, generation)
+    && session.audioRequest === controller
+    && !controller.signal.aborted
+  generateGeminiAudiobookChunk(active, startCfi, voice, controller, isCurrent, speechStart)
+    .then((prepared) => {
+      if (!isCurrentAudiobookRequest(active, generation) || session.audioRequest !== controller) return
+      session.audioRequest = null
+      if (!prepared) {
+        session.status = 'ended'
+        session.message = 'You have reached the end of the book.'
+        renderAudiobookPlayer(active)
+        return
+      }
+      installGeminiAudiobookChunk(active, generation, prepared)
+    })
+    .catch((error) => {
+      if (!isCurrentAudiobookRequest(active, generation) || session.audioRequest !== controller) return
+      session.audioRequest = null
+      failAudiobookPlayback(active, error)
+    })
 }
 
 function failAudiobookPlayback(active, error) {
@@ -3255,6 +3648,11 @@ function speakAudiobookPage(active, generation, startIndex = 0) {
   if (!isCurrentAudiobookRequest(active, generation)) return
   const session = active.audiobook
   if (session.status !== 'playing') return
+  const geminiVoice = selectedGeminiAudiobookVoice()
+  if (geminiVoice) {
+    speakGeminiAudiobookChunk(active, generation, startIndex, geminiVoice)
+    return
+  }
   let text
   let transcriptText
   try {
@@ -3285,11 +3683,6 @@ function speakAudiobookPage(active, generation, startIndex = 0) {
     ? Math.max(0, Math.min(Math.floor(startIndex), text.length - 1))
     : 0
   if (speechStart > 0) highlightAudiobookWord(active, transcriptOffset + speechStart)
-  const geminiVoice = selectedGeminiAudiobookVoice()
-  if (geminiVoice) {
-    speakGeminiAudiobookPage(active, generation, text, speechStart, transcriptOffset, geminiVoice)
-    return
-  }
   if (!speechSynthesisAvailable()) {
     failAudiobookPlayback(active, new Error('Browser speech is unavailable. Select a Gemini voice to use OpenRouter text-to-speech.'))
     return
@@ -3529,6 +3922,7 @@ async function openAudiobookPlayer() {
 }
 
 function closeAudiobookPlayer(restoreFocus = true) {
+  closeAudiobookVoiceMenu()
   const active = state.active
   if (active) {
     stopAudiobookPlayback(active)
@@ -3556,7 +3950,9 @@ function requestBookPageCount() {
   const token = active.pageCountToken
   clearTimeout(active.pageCountTimer)
   active.pageCountOffsets = null
+  active.pageCountBySection = null
   active.pageCountTotal = null
+  renderChapterMarkers(active)
   $('#page-count-label').textContent = '— / —'
   $('#page-count-label').setAttribute('aria-label', 'Counting pages in this book')
   $('#page-count-label').title = 'Counting pages in this book'
@@ -3610,6 +4006,7 @@ async function measureBookPageCount(active, token) {
     if (!sections.length) throw new Error('The EPUB contains no readable sections.')
 
     const pageOffsets = new Array(measurementBook.spine.spineItems.length)
+    const pageCounts = new Array(measurementBook.spine.spineItems.length)
     let totalPages = 0
     for (const section of sections) {
       if (state.active !== active || active.pageCountToken !== token) return
@@ -3620,13 +4017,16 @@ async function measureBookPageCount(active, token) {
         throw new Error(`Could not determine the page count for EPUB section ${section.href}.`)
       }
       pageOffsets[section.index] = totalPages
+      pageCounts[section.index] = pages
       totalPages += pages
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
 
     if (state.active !== active || active.pageCountToken !== token) return
     active.pageCountOffsets = pageOffsets
+    active.pageCountBySection = pageCounts
     active.pageCountTotal = totalPages
+    renderChapterMarkers(active)
     updateReadingPosition(await active.rendition.currentLocation())
   } finally {
     try {
@@ -3674,7 +4074,11 @@ function isCurrentAiStoryRequest(active, request) {
     && state.readerPreferences.theme === aiStoryReaderTheme
 }
 
-async function collectAiStoryPageText(active, startCfi, request) {
+function collectAiStoryPageText(active, startCfi, request) {
+  return collectReaderPageRanges(active, startCfi, 10, () => isCurrentAiStoryRequest(active, request))
+}
+
+async function collectReaderPageRanges(active, startCfi, pageLimit, isCurrent) {
   const readerFrame = $('#epub-frame')
   const width = readerFrame.clientWidth
   const height = readerFrame.clientHeight
@@ -3712,8 +4116,8 @@ async function collectAiStoryPageText(active, startCfi, request) {
 
     const pages = []
     const seenPageCfis = new Set()
-    for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
-      if (!isCurrentAiStoryRequest(active, request)) return pages
+    for (let pageIndex = 0; pageIndex < pageLimit; pageIndex += 1) {
+      if (!isCurrent()) return pages
       const location = backgroundRendition.currentLocation()
       if (!location?.start?.cfi || !location.end?.cfi) {
         throw new Error('Could not locate the text for the next reader page.')
@@ -3737,7 +4141,7 @@ async function collectAiStoryPageText(active, startCfi, request) {
         text: pageRange.toString().replace(/\s+/gu, ' ').trim(),
       })
 
-      if (location.atEnd || pageIndex === 9) break
+      if (location.atEnd || pageIndex === pageLimit - 1) break
       await backgroundRendition.next()
     }
     return pages
@@ -3876,12 +4280,14 @@ async function openBook(id) {
     record,
     lastReaderActionAt: 0,
     pageCountOffsets: null,
+    pageCountBySection: null,
     pageCountTotal: null,
     pageCountToken: 0,
     pageCountTimer: null,
     pageCountQueue: Promise.resolve(),
     pageCountObserver: null,
     pageCountResizeHandler: null,
+    chapterStops: [],
     selection: null,
     selectionLookupController: null,
     selectionMenuToken: 0,
@@ -3903,6 +4309,12 @@ async function openBook(id) {
       audioUrl: null,
       audioRequest: null,
       autoAdvancing: false,
+      prefetchRequest: null,
+      prefetchedChunk: null,
+      prefetchError: null,
+      geminiChunk: null,
+      geminiVoice: '',
+      visibleChunkPageIndex: 0,
       text: '',
       wordOffsets: [],
       wordElements: [],
@@ -4024,9 +4436,8 @@ async function openBook(id) {
       touchStart = null
     }, { capture: true, passive: true })
     pageDocument.addEventListener('contextmenu', (event) => {
-      const selection = pageDocument.getSelection()
-      if (selection && !selection.isCollapsed && selection.toString().trim()) event.preventDefault()
-    })
+      event.preventDefault()
+    }, { capture: true })
     pageDocument.addEventListener('click', (event) => {
       if (suppressedTouchClick) {
         const { x, y, expiresAt } = suppressedTouchClick
@@ -4083,6 +4494,8 @@ async function openBook(id) {
   })
   const navigation = await book.loaded.navigation
   renderToc(navigation.toc || [])
+  active.chapterStops = chapterStops(navigation.toc || [], book)
+  renderChapterMarkers(active)
   icons()
   if (typeof ResizeObserver === 'function') {
     const pageCountObserver = new ResizeObserver(requestBookPageCount)
@@ -4109,6 +4522,34 @@ function renderToc(items, depth = 0) {
   })
   visit(items, depth)
   $('#chapter-list').innerHTML = flattened.map((item) => `<button class="chapter-link" type="button" data-href="${escapeHtml(item.href)}" style="--depth:${item.level}">${escapeHtml(item.label || 'Untitled chapter')}</button>`).join('') || '<p class="toc-empty">No chapter list in this book.</p>'
+}
+
+function chapterStops(items, book) {
+  const stops = new Map()
+  for (const item of items || []) {
+    const section = item.href ? book.spine.get(item.href) : null
+    if (section && !stops.has(section.index)) {
+      stops.set(section.index, { index: section.index, title: normalizeEpubText(item.label) })
+    }
+  }
+  return [...stops.values()].sort((first, second) => first.index - second.index)
+}
+
+function renderChapterMarkers(active) {
+  const markers = $('#chapter-progress-markers')
+  if (!active.pageCountOffsets || !Number.isInteger(active.pageCountTotal) || active.pageCountTotal < 1) {
+    markers.replaceChildren()
+    return
+  }
+
+  const positions = active.chapterStops
+    .map((chapter) => active.pageCountOffsets[chapter.index])
+    .filter((offset) => Number.isInteger(offset) && offset > 0 && offset < active.pageCountTotal)
+    .map((offset) => (offset + 1) / active.pageCountTotal * 100)
+    .filter((position) => position < 100)
+  markers.innerHTML = [...new Set(positions)]
+    .map((position) => `<span class="reading-progress__marker" style="left:${position}%"></span>`)
+    .join('')
 }
 
 function renderBookmarks() {
@@ -4187,7 +4628,7 @@ async function toggleBookmark() {
       id: createUuid(),
       bookId: state.active.record.id,
       cfi,
-      chapter: $('#chapter-label').textContent,
+      chapter: $('#chapter-name-label').textContent,
       percentage: Number.isFinite(percentage) ? percentage : null,
       createdAt: Date.now(),
     }
@@ -4200,12 +4641,33 @@ async function toggleBookmark() {
 
 function updateReadingPosition(location) {
   if (!state.active || !location?.start) return
-  const { book, record } = state.active
+  const active = state.active
+  const { book, record } = active
   const displayed = location.start.displayed
   const pageCount = $('#page-count-label')
   const page = Number(displayed?.page)
-  const pageOffset = state.active.pageCountOffsets?.[location.start.index]
-  const totalPages = state.active.pageCountTotal
+  const sectionIndex = location.start.index
+  const pageOffset = active.pageCountOffsets?.[sectionIndex]
+  let totalPages = active.pageCountTotal
+  const displayedSectionPages = Number(displayed?.total)
+  const measuredSectionPages = active.pageCountBySection?.[sectionIndex]
+  if (
+    Number.isInteger(pageOffset)
+    && Number.isInteger(totalPages)
+    && Number.isInteger(measuredSectionPages)
+    && Number.isInteger(displayedSectionPages)
+    && displayedSectionPages > 0
+    && measuredSectionPages !== displayedSectionPages
+  ) {
+    const pageCountDifference = displayedSectionPages - measuredSectionPages
+    active.pageCountBySection[sectionIndex] = displayedSectionPages
+    for (let index = sectionIndex + 1; index < active.pageCountOffsets.length; index += 1) {
+      if (Number.isInteger(active.pageCountOffsets[index])) active.pageCountOffsets[index] += pageCountDifference
+    }
+    active.pageCountTotal += pageCountDifference
+    totalPages = active.pageCountTotal
+    renderChapterMarkers(active)
+  }
   let bookPage = null
   if (Number.isInteger(page) && page > 0 && Number.isInteger(pageOffset) && Number.isInteger(totalPages) && totalPages > 0) {
     bookPage = pageOffset + page
@@ -4231,7 +4693,39 @@ function updateReadingPosition(location) {
     : null
   $('#progress-fill').style.width = `${percentage ?? 0}%`
   $('#progress-label').textContent = percentage === null ? '—%' : `${percentage.toFixed(percentageDigits)}%`
-  $('#chapter-label').textContent = location.start.href?.split('#')[0]?.split('/').pop()?.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') || 'Reading'
+  let currentChapter
+  for (const chapter of active.chapterStops) {
+    if (chapter.index > sectionIndex) break
+    currentChapter = chapter
+  }
+  $('#chapter-name-label').textContent = currentChapter?.title
+    || location.start.href?.split('#')[0]?.split('/').pop()?.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
+    || 'Reading'
+  const nextChapter = active.chapterStops.find((chapter) => chapter.index > sectionIndex)
+  let remainingPages = null
+  if (
+    Number.isInteger(page)
+    && page > 0
+    && Number.isInteger(displayedSectionPages)
+    && displayedSectionPages >= page
+    && active.pageCountBySection
+  ) {
+    remainingPages = displayedSectionPages - page + 1
+    const chapterEndIndex = nextChapter?.index ?? active.pageCountBySection.length
+    for (let index = sectionIndex + 1; index < chapterEndIndex; index += 1) {
+      const sectionPages = active.pageCountBySection[index]
+      if (Number.isInteger(sectionPages) && sectionPages > 0) remainingPages += sectionPages
+    }
+  }
+  const remainingLabel = $('#chapter-remaining-label')
+  if (remainingPages !== null) {
+    remainingLabel.textContent = `${remainingPages} left`
+    remainingLabel.title = `${remainingPages} pages left`
+    remainingLabel.hidden = false
+  } else {
+    remainingLabel.textContent = ''
+    remainingLabel.hidden = true
+  }
   syncAudiobookPosition(state.active, location)
   syncBookmarkButton(location.start.cfi)
   if (state.readerPreferences.theme === aiStoryReaderTheme) ensureAiStoryBackground(state.active, location)
@@ -4436,7 +4930,7 @@ function scheduleReaderUiHide() {
   clearTimeout(readerUiTimer)
   readerUiTimer = null
   if (!state.active || $('#reader-screen').hidden || readerNavigationPanelOpen()) return
-  readerUiTimer = setTimeout(hideReaderUi, 3000)
+  readerUiTimer = setTimeout(hideReaderUi, 10000)
 }
 
 function hideReaderUi() {
@@ -4805,8 +5299,38 @@ $('#audiobook-skip-forward').addEventListener('click', () => {
     if (state.active) failAudiobookPlayback(state.active, error)
   })
 })
-$('#audiobook-voice-cycle').addEventListener('click', cycleAudiobookVoice)
-$('#audiobook-speed-cycle').addEventListener('click', cycleAudiobookRate)
+$('#audiobook-voice-select').addEventListener('click', toggleAudiobookVoiceMenu)
+const audiobookVoicePicker = $('#audiobook-voice-picker')
+const audiobookVoiceMenu = $('#audiobook-voice-menu')
+audiobookVoiceMenu.addEventListener('keydown', (event) => {
+  const options = [...audiobookVoiceMenu.querySelectorAll('[role="menuitemradio"]')]
+  const currentIndex = options.indexOf(document.activeElement)
+  let nextIndex
+  if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1 + options.length) % options.length
+  else if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + options.length) % options.length
+  else if (event.key === 'Home') nextIndex = 0
+  else if (event.key === 'End') nextIndex = options.length - 1
+  else return
+  event.preventDefault()
+  options[nextIndex]?.focus()
+})
+audiobookVoicePicker.addEventListener('focusout', (event) => {
+  if (event.relatedTarget?.nodeType && !audiobookVoicePicker.contains(event.relatedTarget)) {
+    closeAudiobookVoiceMenu()
+  }
+})
+const audiobookSpeedButton = $('#audiobook-speed-cycle')
+audiobookSpeedButton.addEventListener('click', (event) => {
+  const bounds = audiobookSpeedButton.getBoundingClientRect()
+  const direction = event.detail === 0 || event.clientX >= bounds.left + bounds.width / 2 ? 1 : -1
+  adjustAudiobookRate(direction)
+})
+audiobookSpeedButton.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    adjustAudiobookRate(event.key === 'ArrowLeft' ? -1 : 1)
+  }
+})
 if (speechSynthesisAvailable()) {
   renderAudiobookVoices()
   window.speechSynthesis.addEventListener('voiceschanged', renderAudiobookVoices)
@@ -4844,6 +5368,9 @@ document.addEventListener('pointerdown', (event) => {
   const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement
   if (!target) return
 
+  if (!$('#audiobook-voice-menu').hidden && !target.closest('#audiobook-voice-picker')) {
+    closeAudiobookVoiceMenu()
+  }
   if (!$('#reader-selection-menu').hidden && !target.closest('#reader-selection-menu')) {
     closeReaderSelectionMenu()
   }
@@ -4872,6 +5399,10 @@ $('#chapter-list').addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (!state.active) return
   if (event.key !== 'Escape') return
+  if (!$('#audiobook-voice-menu').hidden) {
+    closeAudiobookVoiceMenu(true)
+    return
+  }
   if (!$('#reader-selection-menu').hidden) {
     closeReaderSelectionMenu()
     return

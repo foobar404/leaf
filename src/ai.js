@@ -184,8 +184,29 @@ export async function generateOpenRouterImage({ apiKey, prompt, inputReferences 
   }
 }
 
-export async function synthesizeOpenRouterSpeech({ apiKey, input, voice, signal }) {
-  const response = await fetch('https://openrouter.ai/api/v1/audio/speech', {
+function waitForOpenRouterRetry(delayMs, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || new DOMException('The request was aborted.', 'AbortError'))
+      return
+    }
+
+    let timeout
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+      reject(signal?.reason || new DOMException('The request was aborted.', 'AbortError'))
+    }
+    timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export async function synthesizeOpenRouterSpeech({ apiKey, input, voice, signal, maxRetries = 1 }) {
+  const requestSpeechAudio = () => fetch('https://openrouter.ai/api/v1/audio/speech', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -202,12 +223,40 @@ export async function synthesizeOpenRouterSpeech({ apiKey, input, voice, signal 
     }),
   })
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => null)
-    throw new Error(error?.error?.message || `OpenRouter returned ${response.status}.`)
+  const retryLimit = Number.isInteger(maxRetries) ? Math.max(0, maxRetries) : 1
+  let pcm
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    let response
+    try {
+      response = await requestSpeechAudio()
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || attempt === retryLimit) throw error
+      await waitForOpenRouterRetry(1000 * (2 ** attempt), signal)
+      continue
+    }
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      const retryable = response.status === 429 || response.status >= 500
+      if (retryable && attempt < retryLimit) {
+        await waitForOpenRouterRetry(1000 * (2 ** attempt), signal)
+        continue
+      }
+      throw new Error(error?.error?.message || `OpenRouter returned ${response.status}.`)
+    }
+
+    try {
+      pcm = await response.arrayBuffer()
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || attempt === retryLimit) throw error
+      await waitForOpenRouterRetry(1000 * (2 ** attempt), signal)
+      continue
+    }
+    if (pcm.byteLength) break
+    if (attempt === retryLimit) break
+    await waitForOpenRouterRetry(1000 * (2 ** attempt), signal)
   }
 
-  const pcm = await response.arrayBuffer()
   if (!pcm.byteLength) throw new Error('OpenRouter returned an empty speech audio response.')
   if (pcm.byteLength > 0xffffffff - 36) throw new Error('OpenRouter returned speech audio that is too large to play.')
 
