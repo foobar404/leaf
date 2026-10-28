@@ -3953,6 +3953,7 @@ function requestBookPageCount() {
   active.pageCountBySection = null
   active.pageCountTotal = null
   renderChapterMarkers(active)
+  renderToc(active.tocItems, active.book, active.pageCountOffsets)
   $('#page-count-label').textContent = '— / —'
   $('#page-count-label').setAttribute('aria-label', 'Counting pages in this book')
   $('#page-count-label').title = 'Counting pages in this book'
@@ -4027,6 +4028,7 @@ async function measureBookPageCount(active, token) {
     active.pageCountBySection = pageCounts
     active.pageCountTotal = totalPages
     renderChapterMarkers(active)
+    renderToc(active.tocItems, active.book, active.pageCountOffsets)
     updateReadingPosition(await active.rendition.currentLocation())
   } finally {
     try {
@@ -4287,6 +4289,7 @@ async function openBook(id) {
     pageCountQueue: Promise.resolve(),
     pageCountObserver: null,
     pageCountResizeHandler: null,
+    tocItems: [],
     chapterStops: [],
     selection: null,
     selectionLookupController: null,
@@ -4493,7 +4496,8 @@ async function openBook(id) {
     updateReadingPosition(location)
   })
   const navigation = await book.loaded.navigation
-  renderToc(navigation.toc || [])
+  active.tocItems = navigation.toc || []
+  renderToc(active.tocItems, book, active.pageCountOffsets)
   active.chapterStops = chapterStops(navigation.toc || [], book)
   renderChapterMarkers(active)
   icons()
@@ -4514,14 +4518,20 @@ async function openBook(id) {
   })
 }
 
-function renderToc(items, depth = 0) {
+function renderToc(items, book, pageOffsets = null, depth = 0) {
   const flattened = []
   const visit = (entries, level) => entries.forEach((entry) => {
     flattened.push({ ...entry, level })
     if (entry.subitems?.length) visit(entry.subitems, level + 1)
   })
   visit(items, depth)
-  $('#chapter-list').innerHTML = flattened.map((item) => `<button class="chapter-link" type="button" data-href="${escapeHtml(item.href)}" style="--depth:${item.level}">${escapeHtml(item.label || 'Untitled chapter')}</button>`).join('') || '<p class="toc-empty">No chapter list in this book.</p>'
+  $('#chapter-list').innerHTML = flattened.map((item) => {
+    const section = item.href ? book.spine.get(item.href) : null
+    const offset = section ? pageOffsets?.[section.index] : null
+    const page = Number.isInteger(offset) && offset >= 0 ? offset + 1 : null
+    const pageLabel = page === null ? '—' : `Page ${page}`
+    return `<button class="chapter-link" type="button" data-href="${escapeHtml(item.href)}" style="--depth:${item.level}"><span class="chapter-link__title">${escapeHtml(item.label || 'Untitled chapter')}</span><small class="chapter-link__page">${pageLabel}</small></button>`
+  }).join('') || '<p class="toc-empty">No chapter list in this book.</p>'
 }
 
 function chapterStops(items, book) {
@@ -4667,6 +4677,7 @@ function updateReadingPosition(location) {
     active.pageCountTotal += pageCountDifference
     totalPages = active.pageCountTotal
     renderChapterMarkers(active)
+    renderToc(active.tocItems, book, active.pageCountOffsets)
   }
   let bookPage = null
   if (Number.isInteger(page) && page > 0 && Number.isInteger(pageOffset) && Number.isInteger(totalPages) && totalPages > 0) {
