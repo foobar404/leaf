@@ -1,13 +1,8 @@
-const CACHE_NAME = 'leaf-pwa-v5'
+const CACHE_NAME = 'leaf-pwa-v6'
 const APP_BASE_URL = new URL('./', self.location.href)
 const APP_SHELL = [
   'manifest.webmanifest',
   'logo.svg',
-  'reader-themes/parchment-fibers.svg',
-  'reader-themes/botanical-paper.svg',
-  'reader-themes/linen-weave.svg',
-  'reader-themes/watercolor-wash.svg',
-  'reader-themes/recycled-paper.svg',
 ].map((path) => new URL(path, APP_BASE_URL).href)
 
 self.addEventListener('install', (event) => {

@@ -6,17 +6,15 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test"
   },
   "dependencies": {
-    "epubjs": "^0.3.93",
+    "@xmldom/xmldom": "^0.8.15",
     "fflate": "^0.8.3",
     "lucide": "^0.468.0"
   },
   "devDependencies": {
     "vite": "^7.0.0"
-  },
-  "overrides": {
-    "@xmldom/xmldom": "^0.8.15"
   }
 }
