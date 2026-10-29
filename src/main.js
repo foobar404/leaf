@@ -1,4 +1,6 @@
-import ePub, { EpubCFI } from 'epubjs'
+import { EpubCFI } from './epub-reader/cfi.js'
+import { parseEpub } from './epub-reader/parser.js'
+import { createRendition } from './epub-reader/renderer.js'
 import {
   createIcons,
   AlignLeft,
@@ -74,8 +76,8 @@ const iconSet = {
   X,
 }
 
-const readerPreferenceDefaults = { fontSize: 100, font: 'serif', lineHeight: 1.75, theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
-const readerPageTurnThrottleMs = 300
+const readerPreferenceDefaults = { fontSize: 100, font: 'serif', fontWeight: 'normal', lineHeight: 1.75, highlightColor: '#f4d78f', theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
+const readerPageTurnThrottleMs = 150
 const aiStoryReaderTheme = 'ai-story-background'
 const chapterDraftChunkCharacterLimit = 8000
 const chapterDraftChunkWordLimit = 1000
@@ -99,16 +101,6 @@ const readerFonts = {
   tahoma: 'Tahoma, Geneva, sans-serif',
   openSans: '"Open Sans", "Segoe UI", sans-serif',
 }
-const readerThemeImages = {
-  parchment: new URL(`${import.meta.env.BASE_URL}reader-themes/parchment-fibers.svg`, window.location.href).href,
-  botanical: new URL(`${import.meta.env.BASE_URL}reader-themes/botanical-paper.svg`, window.location.href).href,
-  linen: new URL(`${import.meta.env.BASE_URL}reader-themes/linen-weave.svg`, window.location.href).href,
-  watercolor: new URL(`${import.meta.env.BASE_URL}reader-themes/watercolor-wash.svg`, window.location.href).href,
-  recycled: new URL(`${import.meta.env.BASE_URL}reader-themes/recycled-paper.svg`, window.location.href).href,
-  cotton: new URL(`${import.meta.env.BASE_URL}reader-themes/cotton-paper.svg`, window.location.href).href,
-  newsprint: new URL(`${import.meta.env.BASE_URL}reader-themes/newsprint-paper.svg`, window.location.href).href,
-  rice: new URL(`${import.meta.env.BASE_URL}reader-themes/rice-paper.svg`, window.location.href).href,
-}
 const readerThemes = {
   'paper-white': { background: '#FAF9F6', color: '#242424' },
   'warm-ivory': { background: '#FFF8E7', color: '#2E281F' },
@@ -131,12 +123,6 @@ const readerThemes = {
   'citrus-gradient': { background: '#F4E5B6', color: '#3B3320', backgroundGradient: 'linear-gradient(135deg, #FFF1BD 0%, #F3CF8B 48%, #C6DEBD 100%)' },
   'rosewood-gradient': { background: '#EAD8CC', color: '#392B2B', backgroundGradient: 'linear-gradient(135deg, #F3E2D4 0%, #D6B2A2 48%, #8D879D 100%)' },
   'glacier-gradient': { background: '#DCEBF2', color: '#26343D', backgroundGradient: 'linear-gradient(135deg, #EAF5F8 0%, #B4D9E5 50%, #C8C1E2 100%)' },
-  'parchment-grain': { background: '#F4EBD9', color: '#342D22', backgroundImage: readerThemeImages.parchment },
-  'botanical-paper': { background: '#EDF2E7', color: '#29342C', backgroundImage: readerThemeImages.botanical },
-  'linen-weave': { background: '#F0ECE2', color: '#302D28', backgroundImage: readerThemeImages.linen },
-  'watercolor-wash': { background: '#F3E9E4', color: '#352D32', backgroundImage: readerThemeImages.watercolor },
-  'recycled-paper': { background: '#F3EFDF', color: '#332F28', backgroundImage: readerThemeImages.recycled },
-  'cotton-paper': { background: '#F5F0E8', color: '#39332D', backgroundImage: readerThemeImages.cotton },
   [aiStoryReaderTheme]: { background: '#F4EBD9', color: '#342D22', aiStory: true },
   'lemon-cream': { background: '#FAF3CE', color: '#38311B' },
   'terracotta-paper': { background: '#F2DDD3', color: '#462D25' },
@@ -148,8 +134,6 @@ const readerThemes = {
   'deep-ocean': { background: '#283435', color: '#E5ECEB', dark: true },
   'storm-slate': { background: '#353F4E', color: '#EFF3F8', dark: true },
   'burgundy-night': { background: '#33232D', color: '#F2E8ED', dark: true },
-  'newsprint-paper': { background: '#F1EEE5', color: '#34312B', backgroundImage: readerThemeImages.newsprint },
-  'rice-paper': { background: '#F4F0E4', color: '#342F28', backgroundImage: readerThemeImages.rice },
 }
 const coverArtStyles = {
   photographic: 'photographic',
@@ -269,12 +253,23 @@ function loadReaderPreferences() {
     const saved = JSON.parse(localStorage.getItem('leaf-reader-preferences') || '{}')
     const preferences = saved && typeof saved === 'object' ? saved : {}
     const size = Number(preferences.fontSize)
+    const legacyFontWeight = Number(preferences.fontWeight)
     const lineHeight = Number(preferences.lineHeight)
     const aiBackgroundOpacity = Number(preferences.aiBackgroundOpacity)
     return {
       fontSize: Number.isFinite(size) ? Math.min(200, Math.max(50, size)) : readerPreferenceDefaults.fontSize,
       font: Object.hasOwn(readerFonts, preferences.font) ? preferences.font : readerPreferenceDefaults.font,
+      fontWeight: ['normal', 'bold'].includes(preferences.fontWeight)
+        ? preferences.fontWeight
+        : preferences.fontWeight === 'bolder' || ([300, 400, 500, 600, 700].includes(legacyFontWeight) && legacyFontWeight >= 600)
+          ? 'bold'
+          : [300, 400, 500, 600, 700].includes(legacyFontWeight)
+            ? 'normal'
+            : readerPreferenceDefaults.fontWeight,
       lineHeight: [1.5, 1.75, 2].includes(lineHeight) ? lineHeight : readerPreferenceDefaults.lineHeight,
+      highlightColor: typeof preferences.highlightColor === 'string' && /^#[\da-f]{6}$/i.test(preferences.highlightColor)
+        ? preferences.highlightColor
+        : readerPreferenceDefaults.highlightColor,
       aiBackgroundOpacity: Number.isFinite(aiBackgroundOpacity)
         ? Math.min(100, Math.max(0, aiBackgroundOpacity))
         : readerPreferenceDefaults.aiBackgroundOpacity,
@@ -359,7 +354,8 @@ const state = {
   query: '',
   writer: createWriterState(),
 }
-let saveTimer
+let pendingReadingProgress = null
+let pendingReadingProgressWrite = Promise.resolve()
 let writerAutosaveTimer = null
 let writerSaveInProgress = false
 let readerUiTimer = null
@@ -617,9 +613,37 @@ app.innerHTML = `
               <span class="reader-font-size-control__large" aria-hidden="true">A</span>
             </div>
           </label>
-          <label class="reader-setting" for="reader-font-family"><span>Typeface</span><select id="reader-font-family">
-            <optgroup label="Serif"><option value="serif">Georgia</option><option value="soft">Palatino</option><option value="garamond">Garamond</option><option value="bookman">Bookman</option></optgroup>
-            <optgroup label="Sans-serif"><option value="sans">Arial</option><option value="system">System UI</option><option value="segoe">Segoe UI</option><option value="helvetica">Helvetica</option><option value="roboto">Roboto</option><option value="tahoma">Tahoma</option><option value="openSans">Open Sans</option><option value="verdana">Verdana</option><option value="trebuchet">Trebuchet</option></optgroup>
+          <div class="reader-setting">
+            <span id="reader-font-family-label">Typeface</span>
+            <div class="reader-font-picker" id="reader-font-picker">
+              <button class="reader-font-picker__trigger" type="button" id="reader-font-family-button" aria-haspopup="listbox" aria-controls="reader-font-family-menu" aria-expanded="false" aria-labelledby="reader-font-family-label reader-font-family-value">
+                <span id="reader-font-family-value"></span>
+              </button>
+              <div class="reader-font-picker__menu" id="reader-font-family-menu" role="listbox" aria-labelledby="reader-font-family-label" hidden>
+                <div class="reader-font-picker__group" role="group" aria-label="Serif">
+                  <span class="reader-font-picker__group-label" aria-hidden="true">Serif</span>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="serif" aria-selected="true"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Georgia</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="soft" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Palatino</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="garamond" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Garamond</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="bookman" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Bookman</span></button>
+                </div>
+                <div class="reader-font-picker__group" role="group" aria-label="Sans-serif">
+                  <span class="reader-font-picker__group-label" aria-hidden="true">Sans-serif</span>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="sans" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Arial</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="system" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">System UI</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="segoe" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Segoe UI</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="helvetica" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Helvetica</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="roboto" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Roboto</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="tahoma" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Tahoma</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="openSans" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Open Sans</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="verdana" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Verdana</span></button>
+                  <button class="reader-font-picker__option" type="button" role="option" data-reader-font-option="trebuchet" aria-selected="false"><span class="reader-font-picker__sample" aria-hidden="true">Aa</span><span class="reader-font-picker__name">Trebuchet</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <label class="reader-setting" for="reader-font-weight"><span>Font weight</span><select id="reader-font-weight">
+            <option value="normal">Normal</option><option value="bold">Bold</option>
           </select></label>
           <div class="reader-setting">
             <span>Line spacing</span>
@@ -637,6 +661,7 @@ app.innerHTML = `
           </div>
           </div>
           <div class="reader-settings__appearance">
+          <label class="reader-setting reader-highlight-color-setting" for="reader-highlight-color"><span>Highlight color</span><input id="reader-highlight-color" type="color" value="#f4d78f" /></label>
           <fieldset class="reader-theme-picker"><legend>Page theme</legend><div class="reader-theme-options">
             <div class="reader-theme-category"><span class="reader-theme-category__label">Light</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="paper-white" style="--reader-theme-background:#FAF9F6" aria-pressed="true"><span class="reader-theme-option__swatch"></span><span>Paper White</span></button>
@@ -657,16 +682,6 @@ app.innerHTML = `
               <button class="reader-theme-option" type="button" data-reader-theme="deep-ocean" style="--reader-theme-background:#283435" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Deep Teal</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="storm-slate" style="--reader-theme-background:#353F4E" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Storm Slate</span></button>
               <button class="reader-theme-option" type="button" data-reader-theme="burgundy-night" style="--reader-theme-background:#33232D" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Burgundy Night</span></button>
-            </div></div>
-            <div class="reader-theme-category"><span class="reader-theme-category__label">Textured</span><div class="reader-theme-category-options">
-              <button class="reader-theme-option" type="button" data-reader-theme="parchment-grain" style="--reader-theme-background:#F4EBD9" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Parchment Grain</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="botanical-paper" style="--reader-theme-background:#EDF2E7" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Botanical Paper</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="linen-weave" style="--reader-theme-background:#F0ECE2" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Linen Weave</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="watercolor-wash" style="--reader-theme-background:#F3E9E4" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Watercolor Wash</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="recycled-paper" style="--reader-theme-background:#F3EFDF" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Recycled Paper</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="cotton-paper" style="--reader-theme-background:#F5F0E8" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Cotton Paper</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="newsprint-paper" style="--reader-theme-background:#F1EEE5" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Newsprint</span></button>
-              <button class="reader-theme-option" type="button" data-reader-theme="rice-paper" style="--reader-theme-background:#F4F0E4" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Rice Paper</span></button>
             </div></div>
             <div class="reader-theme-category"><span class="reader-theme-category__label">Gradient</span><div class="reader-theme-category-options">
               <button class="reader-theme-option" type="button" data-reader-theme="sunset-gradient" style="--reader-theme-background:#F1D9D1" aria-pressed="false"><span class="reader-theme-option__swatch"></span><span>Sunset</span></button>
@@ -697,7 +712,6 @@ app.innerHTML = `
           <div class="reader-main">
             <div class="reader-stage">
               <div class="epub-frame" id="epub-frame" aria-label="Book text"></div>
-              <div class="reader-touch-overlay" aria-hidden="true"></div>
             </div>
             <footer class="reader-footer"><button class="icon-button reader-page-button" type="button" id="reader-prev-page" aria-label="Previous page" title="Previous page"><i data-lucide="chevron-left"></i></button><span id="chapter-label"><span class="reader-footer__chapter-name" id="chapter-name-label">A quiet moment</span><span class="reader-footer__chapter-remaining" id="chapter-remaining-label" hidden></span></span><div class="reading-progress-group"><div class="reading-progress"><span class="reading-progress__fill" id="progress-fill"></span><span class="reading-progress__markers" id="chapter-progress-markers" aria-hidden="true"></span></div><div class="reading-progress-meta"><span id="page-count-label" aria-label="Page count unavailable" title="Page count unavailable">— / —</span><span id="progress-label">—%</span></div></div><button class="icon-button reader-page-button" type="button" id="reader-next-page" aria-label="Next page" title="Next page"><i data-lucide="chevron-right"></i></button></footer>
           </div>
@@ -840,13 +854,10 @@ async function loadBookCover(record) {
   bookCoverLoads.add(record.id)
   let book
   try {
-    book = ePub(record.data)
-    await book.ready
-    const coverUrl = await book.coverUrl()
-    if (!coverUrl) return
-    const response = await fetch(coverUrl)
-    if (!response.ok) return
-    const imageUrl = URL.createObjectURL(await response.blob())
+    book = parseEpub(record.data, { lazySections: true })
+    const cover = book.cover
+    if (!cover || !['image/png', 'image/jpeg'].includes(cover.mediaType)) return
+    const imageUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.mediaType }))
     if (!state.books.some((item) => item.id === record.id)) {
       URL.revokeObjectURL(imageUrl)
       return
@@ -1025,7 +1036,7 @@ function epubNavigationTitles(items, book, titles = new Map()) {
 }
 
 async function readEpubChapters(data) {
-  const book = ePub(data)
+  const book = parseEpub(data, { lazySections: true })
   try {
     await book.ready
     const [metadata, navigation] = await Promise.all([book.loaded.metadata, book.loaded.navigation])
@@ -1034,7 +1045,6 @@ async function readEpubChapters(data) {
     const chapters = []
 
     for (const section of allSections) {
-      await section.load(book.load.bind(book))
       const chapter = extractEpubChapter(section, navigationTitles.get(section.index), chapters.length + 1)
       if (chapter) chapters.push(chapter)
     }
@@ -1053,15 +1063,11 @@ async function readEpubChapters(data) {
 }
 
 async function readEpubCover(book) {
-  const coverUrl = await book.coverUrl()
-  if (!coverUrl) return null
-  const response = await fetch(coverUrl)
-  if (!response.ok) throw new Error(`The existing cover could not be read (${response.status}).`)
-  const blob = await response.blob()
-  if (!['image/png', 'image/jpeg'].includes(blob.type)) {
-    throw new Error(`The existing cover format "${blob.type || 'unknown'}" is not supported for editing.`)
+  if (!book.cover) return null
+  if (!['image/png', 'image/jpeg'].includes(book.cover.mediaType)) {
+    throw new Error(`The existing cover format "${book.cover.mediaType || 'unknown'}" is not supported for editing.`)
   }
-  return { data: new Uint8Array(await blob.arrayBuffer()), mediaType: blob.type }
+  return { data: new Uint8Array(book.cover.data), mediaType: book.cover.mediaType }
 }
 
 function escapeHtml(value) {
@@ -2412,7 +2418,7 @@ async function importFile(file) {
   const input = $('#epub-input')
   try {
     const data = await file.arrayBuffer()
-    const book = ePub(data)
+    const book = parseEpub(data)
     await book.ready
     const metadata = await book.loaded.metadata
     const record = {
@@ -2424,7 +2430,7 @@ async function importFile(file) {
       addedAt: Date.now(),
     }
     await storeRequest('books', 'readwrite', (store) => store.add(record))
-    await book.destroy()
+    book.destroy()
     state.books.push(record)
     renderLibrary()
     openBook(record.id)
@@ -2486,16 +2492,25 @@ function positionReaderSelectionMenu(active, selection) {
 
 function showReaderSelectionMenu(active, cfiRange, contents) {
   const selection = contents.document.getSelection()
-  const frame = contents.document.defaultView?.frameElement
+  const frame = contents.frame || active.rendition.container
   if (!selection || selection.isCollapsed || !frame) return
   const text = selection.toString().trim()
   if (!text) return
   const range = selection.getRangeAt(0)
+  const frameBounds = frame.getBoundingClientRect()
+  const rangeBounds = range.getBoundingClientRect()
   const nextSelection = {
     cfiRange,
     text,
     frame,
-    rect: range.getBoundingClientRect(),
+    rect: {
+      left: rangeBounds.left - frameBounds.left,
+      top: rangeBounds.top - frameBounds.top,
+      right: rangeBounds.right - frameBounds.left,
+      bottom: rangeBounds.bottom - frameBounds.top,
+      width: rangeBounds.width,
+      height: rangeBounds.height,
+    },
     token: (active.selectionMenuToken || 0) + 1,
   }
   active.selectionLookupController?.abort()
@@ -2586,7 +2601,7 @@ async function toggleReaderSelectionHighlight() {
         { text: newHighlight.text },
         undefined,
         'leaf-reader-highlight',
-        { fill: '#f4d78f', 'fill-opacity': '0.42' },
+        { fill: state.readerPreferences.highlightColor, 'fill-opacity': '0.42' },
       )
       button.querySelector('span').textContent = 'Remove highlight'
       showToast('Highlight saved.')
@@ -2800,6 +2815,7 @@ function turnActivePage(direction) {
   const active = state.active
   const rendition = active?.rendition
   if (!rendition || !allowReaderAction(active)) return
+  active.pendingProgressRestore = null
   closeReaderSelectionMenu(active)
   if (active.audiobook.status === 'playing' && !active.audiobook.autoAdvancing) {
     stopAudiobookPlayback(active, 'Playback stopped because the page changed.')
@@ -3890,7 +3906,9 @@ async function openAudiobookPlayer() {
   $('#audiobook-cover').style.backgroundImage = ''
   renderAudiobookVoices()
   const location = active.rendition.currentLocation()
-  if (location?.start) updateReadingPosition(location)
+  if (location?.start && !active.rendition.displayPending) {
+    updateReadingPosition(location)
+  }
   try {
     const pageText = audiobookCurrentPageText(active)
     const transcriptText = audiobookCurrentTranscriptText(active, pageText)
@@ -3906,8 +3924,11 @@ async function openAudiobookPlayer() {
   $('#audiobook-close').focus()
 
   try {
-    const coverUrl = await active.book.coverUrl()
-    if (state.active !== active || !session.open || !coverUrl) return
+    const cover = active.book.cover
+    if (!cover || !['image/png', 'image/jpeg'].includes(cover.mediaType)) return
+    const coverUrl = URL.createObjectURL(new Blob([cover.data], { type: cover.mediaType }))
+    active.readerObjectUrls.add(coverUrl)
+    if (state.active !== active || !session.open) return
     const coverImage = `url("${coverUrl}")`
     $('#audiobook-background').style.backgroundImage = coverImage
     $('#audiobook-cover').style.backgroundImage = coverImage
@@ -3943,15 +3964,34 @@ function cancelBookPageCount(active) {
   if (active.pageCountResizeHandler) window.removeEventListener('resize', active.pageCountResizeHandler)
 }
 
+function pageLocationAtPercentage(percentage, pageOffsets, pageCounts, totalPages) {
+  if (!Number.isFinite(percentage) || !Number.isInteger(totalPages) || totalPages < 1) return null
+  const clampedPercentage = Math.min(100, Math.max(0, percentage))
+  const bookPage = Math.max(1, Math.min(totalPages, Math.round((clampedPercentage / 100) * totalPages)))
+  for (let sectionIndex = 0; sectionIndex < pageCounts.length; sectionIndex += 1) {
+    const offset = pageOffsets[sectionIndex]
+    const pageCount = pageCounts[sectionIndex]
+    if (!Number.isInteger(offset) || !Number.isInteger(pageCount) || pageCount < 1) continue
+    const page = bookPage - offset
+    if (page >= 1 && page <= pageCount) return { sectionIndex, page }
+  }
+  return null
+}
+
+function hasSavedPage(progress, sectionCount) {
+  return Number.isInteger(progress?.sectionIndex)
+    && progress.sectionIndex >= 0
+    && progress.sectionIndex < sectionCount
+    && Number.isInteger(progress.page)
+    && progress.page > 0
+}
+
 function requestBookPageCount() {
   const active = state.active
   if (!active || $('#reader-screen').hidden) return
   active.pageCountToken += 1
   const token = active.pageCountToken
   clearTimeout(active.pageCountTimer)
-  active.pageCountOffsets = null
-  active.pageCountBySection = null
-  active.pageCountTotal = null
   renderChapterMarkers(active)
   renderToc(active.tocItems, active.book, active.pageCountOffsets)
   $('#page-count-label').textContent = '— / —'
@@ -3990,24 +4030,15 @@ async function measureBookPageCount(active, token) {
   })
   document.body.append(container)
 
-  let measurementBook
+  let measurementRendition
   try {
-    measurementBook = ePub(active.record.data)
-    await measurementBook.ready
-    measurementBook.spine.hooks.content.register(sanitizeEpubContent)
-    const measurementRendition = measurementBook.renderTo(container, {
-      width,
-      height,
-      spread: 'none',
-      flow: 'paginated',
-      allowScriptedContent: false,
-    })
+    measurementRendition = createRendition(active.book, container)
     applyRenditionReaderTheme(measurementRendition, state.readerPreferences)
-    const sections = measurementBook.spine.spineItems.filter((section) => section.href)
+    const sections = active.book.spine.spineItems.filter((section) => section.href)
     if (!sections.length) throw new Error('The EPUB contains no readable sections.')
 
-    const pageOffsets = new Array(measurementBook.spine.spineItems.length)
-    const pageCounts = new Array(measurementBook.spine.spineItems.length)
+    const pageOffsets = new Array(active.book.spine.spineItems.length)
+    const pageCounts = new Array(active.book.spine.spineItems.length)
     let totalPages = 0
     for (const section of sections) {
       if (state.active !== active || active.pageCountToken !== token) return
@@ -4027,28 +4058,29 @@ async function measureBookPageCount(active, token) {
     active.pageCountOffsets = pageOffsets
     active.pageCountBySection = pageCounts
     active.pageCountTotal = totalPages
+    active.progressBarReady = true
     renderChapterMarkers(active)
     renderToc(active.tocItems, active.book, active.pageCountOffsets)
-    updateReadingPosition(await active.rendition.currentLocation())
+    const savedProgress = active.pendingProgressRestore
+    if (
+      savedProgress
+      && !hasSavedPage(savedProgress, active.book.spine.spineItems.length)
+      && Number.isFinite(savedProgress.percentage)
+    ) {
+      const target = pageLocationAtPercentage(savedProgress.percentage, pageOffsets, pageCounts, totalPages)
+      if (target) await active.rendition.displayPage(target.sectionIndex, target.page)
+      if (active.pendingProgressRestore === savedProgress) active.pendingProgressRestore = null
+    }
+    if (!active.rendition.displayPending) {
+      updateReadingPosition(active.rendition.currentLocation(), 'page-count-complete')
+    }
   } finally {
     try {
-      measurementBook?.destroy()
+      measurementRendition?.destroy()
     } finally {
       container.remove()
     }
   }
-}
-
-function sanitizeEpubContent(document) {
-  document.querySelectorAll('script').forEach((script) => script.remove())
-  document.querySelectorAll('*').forEach((element) => {
-    Array.from(element.attributes).forEach(({ name, value }) => {
-      const attributeName = name.toLowerCase()
-      const isExecutableUrl = ['href', 'src', 'xlink:href', 'action', 'formaction'].includes(attributeName)
-        && /^\s*javascript:/i.test(value)
-      if (attributeName.startsWith('on') || isExecutableUrl) element.removeAttribute(name)
-    })
-  })
 }
 
 function cancelAiStoryBackground(active) {
@@ -4067,6 +4099,11 @@ function clearAiStoryBackgroundCache(active) {
 function destroyAiStoryBackgrounds(active) {
   cancelAiStoryBackground(active)
   clearAiStoryBackgroundCache(active)
+}
+
+function destroyReaderObjectUrls(active) {
+  for (const url of active.readerObjectUrls) URL.revokeObjectURL(url)
+  active.readerObjectUrls.clear()
 }
 
 function isCurrentAiStoryRequest(active, request) {
@@ -4103,16 +4140,8 @@ async function collectReaderPageRanges(active, startCfi, pageLimit, isCurrent) {
   let backgroundBook
   let backgroundRendition
   try {
-    backgroundBook = ePub(active.record.data)
-    await backgroundBook.ready
-    backgroundBook.spine.hooks.content.register(sanitizeEpubContent)
-    backgroundRendition = backgroundBook.renderTo(container, {
-      width,
-      height,
-      spread: 'none',
-      flow: 'paginated',
-      allowScriptedContent: false,
-    })
+    backgroundBook = parseEpub(active.record.data, { lazySections: true })
+    backgroundRendition = createRendition(backgroundBook, container)
     applyRenditionReaderTheme(backgroundRendition, state.readerPreferences)
     await backgroundRendition.display(startCfi)
 
@@ -4257,30 +4286,29 @@ function ensureAiStoryBackground(active, location) {
 async function openBook(id) {
   const record = state.books.find((book) => book.id === id)
   if (!record) return
+  const progressWrite = flushPendingReadingProgress()
   closeReaderSelectionMenu()
   clearReaderUiTimer()
   if (state.active) {
     closeAudiobookPlayer(false)
     cancelBookPageCount(state.active)
     destroyAiStoryBackgrounds(state.active)
+    destroyReaderObjectUrls(state.active)
     state.active.rendition.destroy()
     state.active.book.destroy()
   }
-  const book = ePub(record.data)
+  const book = parseEpub(record.data, { lazySections: true })
   await book.ready
-  book.spine.hooks.content.register(sanitizeEpubContent)
-  const rendition = book.renderTo('epub-frame', {
-    width: '100%',
-    height: '100%',
-    spread: 'none',
-    flow: 'paginated',
-    allowScriptedContent: false,
-  })
+  await progressWrite
+  const rendition = createRendition(book, $('#epub-frame'))
   const active = {
     book,
     rendition,
     record,
     lastReaderActionAt: 0,
+    pendingProgressRestore: null,
+    progressReady: false,
+    progressBarReady: false,
     pageCountOffsets: null,
     pageCountBySection: null,
     pageCountTotal: null,
@@ -4297,6 +4325,7 @@ async function openBook(id) {
     aiBackgroundByPage: new Map(),
     aiBackgroundRanges: [],
     aiBackgroundObjectUrls: new Set(),
+    readerObjectUrls: new Set(),
     aiBackgroundUrl: null,
     aiBackgroundRequest: null,
     aiBackgroundRetryAfter: 0,
@@ -4329,158 +4358,25 @@ async function openBook(id) {
     },
   }
   state.active = active
-  for (const highlight of state.highlights.filter((item) => item.bookId === record.id)) {
-    if (typeof highlight.cfiRange !== 'string') continue
-    rendition.annotations.highlight(
-      highlight.cfiRange,
-      { text: highlight.text },
-      undefined,
-      'leaf-reader-highlight',
-      { fill: '#f4d78f', 'fill-opacity': '0.42' },
-    )
-  }
-  const pageDocuments = new WeakSet()
+  applyReaderHighlightColor(active)
   const readerFrame = $('#epub-frame')
-  const dispatchStageGesture = (detail) => {
-    if (state.active !== active) return
-    readerStage.dispatchEvent(new CustomEvent('reader-gesture', { detail }))
-  }
-  const pageXInStage = (pageFrame, pageX) => {
-    const frameBounds = pageFrame.getBoundingClientRect()
-    const stageBounds = readerStage.getBoundingClientRect()
-    const scaleX = pageFrame.clientWidth ? frameBounds.width / pageFrame.clientWidth : 1
-    return frameBounds.left + pageX * scaleX - stageBounds.left
-  }
   rendition.on('selected', (cfiRange, contents) => {
     if (state.active === active) showReaderSelectionMenu(active, cfiRange, contents)
   })
-  rendition.on('rendered', (_section, view) => {
-    const pageDocument = view.contents?.document
-    const pageFrame = view.iframe
-    if (!pageDocument || !pageFrame) {
-      showToast('Reader navigation could not be prepared for this page.')
-      return
-    }
-    if (pageDocuments.has(pageDocument)) return
-    pageDocuments.add(pageDocument)
-    let touchStart = null
-    let suppressedTouchClick = null
-    let mousePressAt = 0
-    let pendingMouseTap = null
-    pageDocument.addEventListener('pointerdown', (event) => {
-      closeReaderSelectionMenu(active)
-      clearTimeout(pendingMouseTap)
-      pendingMouseTap = null
-      if (event.pointerType === 'mouse' && event.button === 0) {
-        mousePressAt = Date.now()
-      } else {
-        mousePressAt = 0
-      }
-    }, { capture: true })
-    pageDocument.addEventListener('touchstart', (event) => {
-      if (event.touches.length !== 1) {
-        touchStart = null
-        return
-      }
-      const touch = event.touches[0]
-      touchStart = { x: touch.clientX, y: touch.clientY, startedAt: Date.now() }
-    }, { capture: true, passive: true })
-    pageDocument.addEventListener('touchmove', (event) => {
-      if (!touchStart) return
-      const selection = pageDocument.getSelection()
-      if (selection && !selection.isCollapsed && selection.toString().trim()) {
-        return
-      }
-      if (event.touches.length !== 1) {
-        touchStart = null
-        return
-      }
-      const touch = event.touches[0]
-      const deltaX = touch.clientX - touchStart.x
-      const deltaY = touch.clientY - touchStart.y
-      if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY) && event.cancelable) {
-        event.preventDefault()
-      }
-    }, { capture: true, passive: false })
-    pageDocument.addEventListener('touchend', (event) => {
-      if (!touchStart) return
-      const start = touchStart
-      touchStart = null
-      const touch = event.changedTouches[0]
-      if (!touch) return
-      const selection = pageDocument.getSelection()
-      const suppressClick = () => {
-        suppressedTouchClick = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
-      }
-      if (selection && !selection.isCollapsed && selection.toString().trim()) {
-        suppressClick()
-        return
-      }
-      const deltaX = touch.clientX - start.x
-      const deltaY = touch.clientY - start.y
-      const swipeThreshold = Math.max(20, pageFrame.clientWidth * 0.04)
-      if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
-        dispatchStageGesture({ type: 'swipe', direction: deltaX < 0 ? 'next' : 'prev' })
-        suppressClick()
-      } else if (Math.abs(deltaX) <= 12 && Math.abs(deltaY) <= 12) {
-        suppressClick()
-        if (Date.now() - start.startedAt < 450) {
-          dispatchStageGesture({
-            type: 'tap',
-            x: pageXInStage(pageFrame, touch.clientX),
-            width: readerStage.clientWidth,
-          })
-        }
-      } else {
-        suppressClick()
-      }
-    }, { capture: true, passive: true })
-    pageDocument.addEventListener('touchcancel', () => {
-      touchStart = null
-    }, { capture: true, passive: true })
-    pageDocument.addEventListener('contextmenu', (event) => {
-      event.preventDefault()
-    }, { capture: true })
-    pageDocument.addEventListener('click', (event) => {
-      if (suppressedTouchClick) {
-        const { x, y, expiresAt } = suppressedTouchClick
-        suppressedTouchClick = null
-        const isTouchClick = event.pointerType && event.pointerType !== 'mouse'
-        const matchesTouch = Math.abs(event.clientX - x) < 32 && Math.abs(event.clientY - y) < 32
-        if (Date.now() < expiresAt && (isTouchClick || (!event.pointerType && matchesTouch))) return
-      }
-      if (event.pointerType && event.pointerType !== 'mouse') return
-      if (event.button !== 0 || event.detail === 0) return
-      const selection = pageDocument.getSelection()
-      if (selection && !selection.isCollapsed && selection.toString().trim()) {
-        clearTimeout(pendingMouseTap)
-        pendingMouseTap = null
-        return
-      }
-      if (event.detail > 1) {
-        clearTimeout(pendingMouseTap)
-        pendingMouseTap = null
-        return
-      }
-      const pressDuration = mousePressAt ? Date.now() - mousePressAt : 0
-      mousePressAt = 0
-      if (pressDuration >= 450) return
-      clearTimeout(pendingMouseTap)
-      pendingMouseTap = setTimeout(() => {
-        pendingMouseTap = null
-        if (state.active !== active) return
-        const currentSelection = pageDocument.getSelection()
-        if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim()) return
-        dispatchStageGesture({
-          type: 'tap',
-          x: pageXInStage(pageFrame, event.clientX),
-          width: readerStage.clientWidth,
-        })
-      }, 220)
-    })
+  rendition.on('error', (error) => {
+    console.error('Could not follow a link in the EPUB.', error)
+    showToast('That EPUB link could not be opened.')
+  })
+  rendition.on('warning', (warning) => showToast(warning))
+  rendition.on('relocated', (location) => {
+    updateReadingPosition(location)
   })
   $('#reader-title').textContent = record.title
   $('#reader-author').textContent = record.author || ''
+  const progressFill = $('#progress-fill')
+  progressFill.classList.add('reading-progress__fill--pending')
+  progressFill.style.width = '0%'
+  $('#progress-label').textContent = '0%'
   app.querySelector('.app-shell').classList.add('app-shell--reading')
   $('#library-screen').hidden = true
   $('#writer-screen').hidden = true
@@ -4491,10 +4387,36 @@ async function openBook(id) {
   setReaderSettingsOpen(false)
   applyReaderTheme()
   const saved = progressFor(id)
-  await rendition.display(saved?.cfi || undefined)
-  rendition.on('relocated', (location) => {
-    updateReadingPosition(location)
-  })
+  active.pendingProgressRestore = saved || null
+  const savedPage = saved && hasSavedPage(saved, book.spine.spineItems.length) ? saved : null
+  let savedPageRestored = false
+  try {
+    if (savedPage) {
+      await rendition.displayPage(savedPage.sectionIndex, savedPage.page)
+      savedPageRestored = true
+    } else {
+      await rendition.display(saved?.cfi || undefined)
+    }
+  } catch (error) {
+    if (!saved?.cfi) throw error
+    console.error('Could not restore the saved EPUB position.', error)
+    showToast('The saved reading position was unavailable; opening the book from the beginning.')
+    await rendition.display()
+  }
+  if (state.active !== active) return
+  const initialLocation = rendition.currentLocation()
+  active.progressReady = Boolean(
+    Number.isInteger(initialLocation?.start?.index)
+    && Number.isInteger(initialLocation.start.displayed?.page)
+    && initialLocation.start.displayed.page > 0,
+  )
+  if (savedPageRestored && active.pendingProgressRestore === savedPage) {
+    active.pendingProgressRestore = null
+  }
+  if (active.progressReady) {
+    progressFill.classList.remove('reading-progress__fill--pending')
+    updateReadingPosition(initialLocation)
+  }
   const navigation = await book.loaded.navigation
   active.tocItems = navigation.toc || []
   renderToc(active.tocItems, book, active.pageCountOffsets)
@@ -4511,11 +4433,7 @@ async function openBook(id) {
   }
   requestBookPageCount()
   showReaderUi()
-  book.locations.generate(1000).then(() => {
-    if (state.active?.record.id === id) updateReadingPosition(rendition.currentLocation())
-  }).catch((error) => {
-    console.error('Could not generate EPUB reading locations.', error)
-  })
+  if (book.warnings.length) showToast(book.warnings[0])
 }
 
 function renderToc(items, book, pageOffsets = null, depth = 0) {
@@ -4594,22 +4512,16 @@ function renderBookmarks() {
 
 async function navigateToHighlight(rendition, cfiRange) {
   const highlightStart = new EpubCFI(cfiRange)
+  const spineIndex = highlightStart.parsed?.spineIndex
+  if (!Number.isInteger(spineIndex)) throw new Error('The saved highlight location is invalid.')
   highlightStart.collapse(true)
   const targetCfi = highlightStart.toString()
-  const cfiComparator = new EpubCFI()
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await rendition.display(targetCfi)
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const location = rendition.currentLocation()
-    if (!location?.start?.cfi || !location.end?.cfi) continue
-    if (
-      cfiComparator.compare(location.start.cfi, targetCfi) <= 0
-      && cfiComparator.compare(targetCfi, location.end.cfi) <= 0
-    ) return
+  const expectedSection = rendition.book.spine.spineItems.find((section) => section.spineIndex === spineIndex)
+  if (!expectedSection) throw new Error('The saved highlight chapter could not be found.')
+  const location = await rendition.display(targetCfi)
+  if (!location?.start?.cfi || location.start.index !== expectedSection.index) {
+    throw new Error('The reader did not open the selected highlight chapter.')
   }
-
-  throw new Error('The reader did not reach the selected highlight.')
 }
 
 function syncBookmarkButton(cfi) {
@@ -4650,8 +4562,8 @@ async function toggleBookmark() {
 }
 
 function updateReadingPosition(location) {
-  if (!state.active || !location?.start) return
   const active = state.active
+  if (!active || !location?.start || !active.progressReady) return
   const { book, record } = active
   const displayed = location.start.displayed
   const pageCount = $('#page-count-label')
@@ -4692,18 +4604,15 @@ function updateReadingPosition(location) {
       pageCount.title = 'Book page count unavailable'
     }
   }
-  const fraction = bookPage !== null
-    ? bookPage / totalPages
-    : book.locations.length()
-      ? book.locations.percentageFromCfi(location.start.cfi)
-      : location.start.percentage
-  const precisionBase = Number.isInteger(totalPages) && totalPages > 0 ? totalPages : book.locations.length()
+  const precisionBase = Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 100
   const percentageDigits = Math.max(0, Math.ceil(Math.log10(precisionBase / 100)))
-  const percentage = Number.isFinite(fraction)
-    ? Number((Math.max(0, Math.min(1, fraction)) * 100).toFixed(percentageDigits))
+  const percentage = active.progressBarReady && bookPage !== null
+    ? Number(((bookPage / totalPages) * 100).toFixed(percentageDigits))
     : null
-  $('#progress-fill').style.width = `${percentage ?? 0}%`
-  $('#progress-label').textContent = percentage === null ? '—%' : `${percentage.toFixed(percentageDigits)}%`
+  if (percentage !== null) {
+    $('#progress-fill').style.width = `${percentage}%`
+    $('#progress-label').textContent = `${percentage.toFixed(percentageDigits)}%`
+  }
   let currentChapter
   for (const chapter of active.chapterStops) {
     if (chapter.index > sectionIndex) break
@@ -4740,25 +4649,58 @@ function updateReadingPosition(location) {
   syncAudiobookPosition(state.active, location)
   syncBookmarkButton(location.start.cfi)
   if (state.readerPreferences.theme === aiStoryReaderTheme) ensureAiStoryBackground(state.active, location)
-  clearTimeout(saveTimer)
-  if (percentage === null) return
-  saveTimer = setTimeout(async () => {
-    const progress = { id: record.id, cfi: location.start.cfi, percentage, lastOpenedAt: Date.now() }
-    try {
-      await storeRequest('progress', 'readwrite', (store) => store.put(progress))
-      const existing = state.progress.findIndex((item) => item.id === record.id)
-      if (existing === -1) state.progress.push(progress)
-      else state.progress[existing] = progress
-    } catch (error) {
-      console.error(error)
-    }
-  }, 450)
+  if (percentage === null || active.pendingProgressRestore) return
+  pendingReadingProgress = {
+    id: record.id,
+    cfi: location.start.cfi,
+    sectionIndex,
+    page: Number.isInteger(page) && page > 0 ? page : null,
+    pageCount: Number.isInteger(displayedSectionPages) && displayedSectionPages > 0 ? displayedSectionPages : null,
+    percentage,
+    lastOpenedAt: Date.now(),
+  }
+  flushPendingReadingProgress()
+}
+
+function flushPendingReadingProgress() {
+  const progress = pendingReadingProgress
+  pendingReadingProgress = null
+  if (progress) {
+    pendingReadingProgressWrite = pendingReadingProgressWrite
+      .then(() => storeTransaction('progress', 'readwrite', (transaction) => {
+        transaction.objectStore('progress').put(progress)
+      }))
+      .then(() => {
+        const existing = state.progress.findIndex((item) => item.id === progress.id)
+        if (existing === -1) state.progress.push(progress)
+        else state.progress[existing] = progress
+      })
+      .catch((error) => {
+        console.error('Could not save reading progress.', error)
+        showToast('Could not save reading progress.')
+      })
+  }
+  return pendingReadingProgressWrite
 }
 
 function persistReaderPreferences() {
   try {
     localStorage.setItem('leaf-reader-preferences', JSON.stringify(state.readerPreferences))
   } catch {}
+}
+
+function applyReaderHighlightColor(active) {
+  if (!active) return
+  for (const highlight of state.highlights.filter((item) => item.bookId === active.record.id)) {
+    if (typeof highlight.cfiRange !== 'string') continue
+    active.rendition.annotations.highlight(
+      highlight.cfiRange,
+      { text: highlight.text },
+      undefined,
+      'leaf-reader-highlight',
+      { fill: state.readerPreferences.highlightColor, 'fill-opacity': '0.42' },
+    )
+  }
 }
 
 function setReaderPreference(name, value) {
@@ -4774,10 +4716,11 @@ function setReaderPreference(name, value) {
     }
   }
   applyReaderTheme()
+  if (name === 'highlightColor') applyReaderHighlightColor(state.active)
   if (name === 'theme' && value === aiStoryReaderTheme && state.active) {
     ensureAiStoryBackground(state.active, state.active.rendition.currentLocation())
   }
-  if (['fontSize', 'font', 'lineHeight'].includes(name)) requestBookPageCount()
+  if (['fontSize', 'font', 'fontWeight', 'lineHeight'].includes(name)) requestBookPageCount()
 }
 
 function readerThemeBackgroundImage(colors, aiBackgroundUrl, aiBackgroundOpacity) {
@@ -4796,6 +4739,7 @@ function readerThemeColors(themeName, aiBackgroundMode) {
 }
 
 function setReaderSettingsOpen(open) {
+  if (!open) setReaderFontMenuOpen(false)
   $('#reader-settings').hidden = !open
   $('#reader-settings-button').setAttribute('aria-expanded', String(open))
   if (open) {
@@ -4805,6 +4749,14 @@ function setReaderSettingsOpen(open) {
   } else {
     scheduleReaderUiHide()
   }
+}
+
+function setReaderFontMenuOpen(open, focusSelected = true) {
+  const button = $('#reader-font-family-button')
+  const menu = $('#reader-font-family-menu')
+  menu.hidden = !open
+  button.setAttribute('aria-expanded', String(open))
+  if (open && focusSelected) menu.querySelector('[aria-selected="true"]')?.focus()
 }
 
 function applyReaderTheme() {
@@ -4822,7 +4774,21 @@ function applyReaderTheme() {
   $('#reader-ai-background-opacity-setting').hidden = !colors.aiStory
   $('#reader-ai-background-mode').value = preferences.aiBackgroundMode
   $('#reader-ai-background-mode-setting').hidden = !colors.aiStory
-  $('#reader-font-family').value = preferences.font
+  const fontButton = $('#reader-font-family-button')
+  const fontOptions = [...document.querySelectorAll('[data-reader-font-option]')]
+  let selectedFontLabel = ''
+  for (const option of fontOptions) {
+    const fontFamily = readerFonts[option.dataset.readerFontOption]
+    if (fontFamily) option.style.fontFamily = fontFamily
+    const selected = option.dataset.readerFontOption === preferences.font
+    option.setAttribute('aria-selected', String(selected))
+    if (selected) selectedFontLabel = option.querySelector('.reader-font-picker__name').textContent
+  }
+  const selectedFontFamily = readerFonts[preferences.font] || readerFonts.serif
+  $('#reader-font-family-value').textContent = selectedFontLabel || 'Georgia'
+  fontButton.style.fontFamily = selectedFontFamily
+  $('#reader-font-weight').value = preferences.fontWeight
+  $('#reader-highlight-color').value = preferences.highlightColor
   document.querySelectorAll('[data-reader-line-height]').forEach((button) => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.readerLineHeight) === preferences.lineHeight))
   })
@@ -4833,8 +4799,9 @@ function applyReaderTheme() {
   preview.style.backgroundImage = backgroundImage
   preview.style.backgroundSize = aiBackgroundUrl ? '100% 100%, cover' : colors.backgroundImage ? '320px 360px' : colors.backgroundGradient ? '100% 100%' : ''
   preview.style.backgroundRepeat = aiBackgroundUrl || colors.backgroundGradient ? 'no-repeat' : 'repeat'
-  previewText.style.fontFamily = readerFonts[preferences.font]
+  previewText.style.fontFamily = selectedFontFamily
   previewText.style.fontSize = `${preferences.fontSize}%`
+  previewText.style.fontWeight = String(preferences.fontWeight)
   previewText.style.lineHeight = String(preferences.lineHeight)
   document.querySelectorAll('[data-reader-theme]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.readerTheme === preferences.theme))
@@ -4880,6 +4847,7 @@ function applyRenditionReaderTheme(rendition, preferences) {
     body: {
       'font-family': `${readerFonts[preferences.font]} !important`,
       'font-size': `${preferences.fontSize}% !important`,
+      'font-weight': `${preferences.fontWeight} !important`,
       'line-height': `${preferences.lineHeight} !important`,
       color: `${colors.color} !important`,
       'background-color': 'transparent !important',
@@ -4895,12 +4863,14 @@ function applyRenditionReaderTheme(rendition, preferences) {
 }
 
 function closeReader() {
+  flushPendingReadingProgress()
   clearReaderUiTimer()
   closeReaderSelectionMenu()
   closeAudiobookPlayer(false)
   if (state.active) {
     cancelBookPageCount(state.active)
     destroyAiStoryBackgrounds(state.active)
+    destroyReaderObjectUrls(state.active)
     state.active.rendition.destroy()
     state.active.book.destroy()
     state.active = null
@@ -5131,7 +5101,6 @@ $('#reader-selection-menu').addEventListener('click', (event) => {
   else closeReaderSelectionMenu()
 })
 const readerStage = $('.reader-stage')
-const readerTouchOverlay = $('.reader-touch-overlay')
 let readerTouchStart = null
 let suppressedReaderTap = null
 readerStage.addEventListener('reader-gesture', (event) => {
@@ -5140,10 +5109,6 @@ readerStage.addEventListener('reader-gesture', (event) => {
   else if (type === 'tap') handleReaderTap(x, width)
 })
 readerStage.addEventListener('touchstart', (event) => {
-  if (event.target instanceof HTMLIFrameElement) {
-    readerTouchStart = null
-    return
-  }
   suppressedReaderTap = null
   if (event.touches.length !== 1) {
     readerTouchStart = null
@@ -5171,6 +5136,11 @@ readerStage.addEventListener('touchend', (event) => {
   readerTouchStart = null
   const touch = event.changedTouches[0]
   if (!touch) return
+  const selection = document.getSelection()
+  if (event.target.closest('a') || (selection && !selection.isCollapsed && selection.toString().trim())) {
+    suppressedReaderTap = { x: touch.clientX, y: touch.clientY, expiresAt: Date.now() + 500 }
+    return
+  }
   const deltaX = touch.clientX - start.x
   const deltaY = touch.clientY - start.y
   const swipeThreshold = Math.max(20, readerStage.clientWidth * 0.04)
@@ -5199,6 +5169,10 @@ readerStage.addEventListener('touchcancel', () => {
   readerTouchStart = null
 }, { passive: true })
 readerStage.addEventListener('click', (event) => {
+  if (event.target.closest('a')) {
+    suppressedReaderTap = null
+    return
+  }
   if (!suppressedReaderTap) return
   const { x, y, expiresAt } = suppressedReaderTap
   suppressedReaderTap = null
@@ -5209,7 +5183,9 @@ readerStage.addEventListener('click', (event) => {
   event.stopImmediatePropagation()
 }, true)
 readerStage.addEventListener('click', (event) => {
-  if (event.target instanceof HTMLIFrameElement || event.target.closest('.reader-touch-overlay')) return
+  if (event.defaultPrevented || event.target.closest('a, .epub-reader__highlights')) return
+  const selection = document.getSelection()
+  if (selection && !selection.isCollapsed && selection.toString().trim()) return
   if (event.pointerType && event.pointerType !== 'mouse') return
   if (event.button !== 0 || event.detail === 0) return
   const bounds = readerStage.getBoundingClientRect()
@@ -5220,12 +5196,6 @@ readerStage.addEventListener('click', (event) => {
       width: readerStage.clientWidth,
     },
   }))
-})
-readerTouchOverlay.addEventListener('click', (event) => {
-  if (event.button !== 0) return
-  const bounds = readerStage.getBoundingClientRect()
-  const x = event.detail === 0 ? readerStage.clientWidth / 2 : event.clientX - bounds.left
-  handleReaderTap(x, readerStage.clientWidth)
 })
 $('#toc-button').addEventListener('click', () => {
   $('#toc-panel').hidden = !$('#toc-panel').hidden
@@ -5263,6 +5233,7 @@ $('#bookmark-list').addEventListener('click', async (event) => {
   }
   const highlight = event.target.closest('[data-highlight-cfi]')
   if (highlight && state.active) {
+    state.active.pendingProgressRestore = null
     closeReaderSelectionMenu()
     $('#bookmark-panel').hidden = true
     $('#bookmarks-button').setAttribute('aria-expanded', 'false')
@@ -5284,6 +5255,7 @@ $('#bookmark-list').addEventListener('click', async (event) => {
   }
   const bookmark = event.target.closest('[data-bookmark-cfi]')
   if (bookmark && state.active) {
+    state.active.pendingProgressRestore = null
     closeReaderSelectionMenu()
     $('#bookmark-panel').hidden = true
     $('#bookmarks-button').setAttribute('aria-expanded', 'false')
@@ -5359,7 +5331,58 @@ $('#reset-reader-settings').addEventListener('click', () => {
 $('#reader-font-size').addEventListener('input', (event) => setReaderPreference('fontSize', Number(event.target.value)))
 $('#reader-ai-background-opacity').addEventListener('input', (event) => setReaderPreference('aiBackgroundOpacity', Number(event.target.value)))
 $('#reader-ai-background-mode').addEventListener('change', (event) => setReaderPreference('aiBackgroundMode', event.target.value))
-$('#reader-font-family').addEventListener('change', (event) => setReaderPreference('font', event.target.value))
+const readerFontPicker = $('#reader-font-picker')
+const readerFontButton = $('#reader-font-family-button')
+const readerFontMenu = $('#reader-font-family-menu')
+readerFontButton.addEventListener('click', () => setReaderFontMenuOpen(readerFontMenu.hidden))
+readerFontButton.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !readerFontMenu.hidden) {
+    event.preventDefault()
+    setReaderFontMenuOpen(false)
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return
+  event.preventDefault()
+  const options = [...readerFontMenu.querySelectorAll('[data-reader-font-option]')]
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.dataset.readerFontOption === state.readerPreferences.font))
+  const nextIndex = event.key === 'ArrowDown'
+    ? selectedIndex
+    : (selectedIndex - 1 + options.length) % options.length
+  setReaderFontMenuOpen(true, false)
+  options[nextIndex]?.focus()
+})
+readerFontMenu.addEventListener('keydown', (event) => {
+  const options = [...readerFontMenu.querySelectorAll('[data-reader-font-option]')]
+  const currentIndex = options.indexOf(document.activeElement)
+  let nextIndex
+  if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1 + options.length) % options.length
+  else if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + options.length) % options.length
+  else if (event.key === 'Home') nextIndex = 0
+  else if (event.key === 'End') nextIndex = options.length - 1
+  else if (event.key === 'Escape') {
+    event.preventDefault()
+    setReaderFontMenuOpen(false)
+    readerFontButton.focus()
+    return
+  } else return
+  event.preventDefault()
+  options[nextIndex]?.focus()
+})
+readerFontMenu.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-reader-font-option]')
+  const font = option?.dataset.readerFontOption
+  if (!font || !readerFonts[font]) return
+  setReaderPreference('font', font)
+  setReaderFontMenuOpen(false)
+  readerFontButton.focus()
+})
+readerFontPicker.addEventListener('focusout', () => {
+  requestAnimationFrame(() => {
+    if (!readerFontPicker.contains(document.activeElement)) setReaderFontMenuOpen(false)
+  })
+})
+$('#reader-font-weight').addEventListener('change', (event) => setReaderPreference('fontWeight', event.target.value))
+$('#reader-highlight-color').addEventListener('input', (event) => setReaderPreference('highlightColor', event.target.value))
 $('#reader-line-spacing-options').addEventListener('click', (event) => {
   const button = event.target.closest('[data-reader-line-height]')
   if (button) setReaderPreference('lineHeight', Number(button.dataset.readerLineHeight))
@@ -5385,6 +5408,9 @@ document.addEventListener('pointerdown', (event) => {
   if (!$('#reader-selection-menu').hidden && !target.closest('#reader-selection-menu')) {
     closeReaderSelectionMenu()
   }
+  if (!readerFontMenu.hidden && !target.closest('#reader-font-picker')) {
+    setReaderFontMenuOpen(false)
+  }
   if (!$('#reader-settings').hidden && !target.closest('#reader-settings, #reader-settings-button')) {
     setReaderSettingsOpen(false)
   }
@@ -5399,6 +5425,7 @@ document.addEventListener('pointerdown', (event) => {
 $('#chapter-list').addEventListener('click', (event) => {
   const chapter = event.target.closest('[data-href]')
   if (!chapter || !state.active) return
+  state.active.pendingProgressRestore = null
   const rendition = state.active.rendition
   closeReaderSelectionMenu()
   $('#toc-panel').hidden = true
@@ -5448,10 +5475,12 @@ document.addEventListener('drop', (event) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    flushPendingReadingProgress()
     flushWriterAutosave().catch((error) => console.error('Could not autosave before the page became hidden.', error))
   }
 })
 window.addEventListener('pagehide', () => {
+  flushPendingReadingProgress()
   flushWriterAutosave().catch((error) => console.error('Could not autosave before leaving the page.', error))
 })
 
