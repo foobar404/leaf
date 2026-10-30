@@ -202,6 +202,43 @@ function parseNavigationDocument(document, opfPath, pathToSection) {
   return toc
 }
 
+export function flattenEpubNavigation(items, level = 0) {
+  return (items || []).flatMap((item) => [
+    { ...item, level },
+    ...flattenEpubNavigation(item.subitems, level + 1),
+  ])
+}
+
+export function epubChapterNavigationItems(items, spine) {
+  return flattenEpubNavigation(items).filter((item) => item.href && spine.get(item.href))
+}
+
+export function epubSectionNavigationOwners(spineItems, navigationItems, spine) {
+  if (!navigationItems.length) {
+    return new Map(spineItems.map((section, index) => [section.index, index]))
+  }
+
+  const linkedEntries = navigationItems
+    .map((item, index) => ({
+      entryIndex: index,
+      level: item.level || 0,
+      sectionIndex: item.href ? spine.get(item.href)?.index : null,
+    }))
+    .filter((entry) => Number.isInteger(entry.sectionIndex))
+    .sort((first, second) => first.sectionIndex - second.sectionIndex
+      || first.level - second.level
+      || first.entryIndex - second.entryIndex)
+
+  return new Map(spineItems.map((section) => {
+    let owner = linkedEntries[0]
+    for (const entry of linkedEntries) {
+      if (entry.sectionIndex > section.index) break
+      owner = entry
+    }
+    return [section.index, owner?.entryIndex ?? 0]
+  }))
+}
+
 function findCoverPath(packageDocument, manifestItems) {
   const coverImage = manifestItems.find((item) => item.properties.split(/\s+/).includes('cover-image'))
   if (coverImage) return coverImage.path

@@ -1,5 +1,11 @@
 import { EpubCFI } from './epub-reader/cfi.js'
-import { parseEpub } from './epub-reader/parser.js'
+import {
+  epubChapterNavigationItems,
+  epubSectionNavigationOwners,
+  flattenEpubNavigation,
+  parseEpub,
+  resolveEpubResourcePath,
+} from './epub-reader/parser.js'
 import { createRendition } from './epub-reader/renderer.js'
 import {
   createIcons,
@@ -77,6 +83,7 @@ const iconSet = {
 }
 
 const readerPreferenceDefaults = { fontSize: 100, font: 'serif', fontWeight: 'normal', lineHeight: 1.75, highlightColor: '#f4d78f', theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
+const audiobookPreferencesStorageKey = 'leaf-audiobook-preferences'
 const readerPageTurnThrottleMs = 150
 const aiStoryReaderTheme = 'ai-story-background'
 const chapterDraftChunkCharacterLimit = 8000
@@ -287,6 +294,36 @@ function loadReaderPreferences() {
   }
 }
 
+function loadAudiobookPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(audiobookPreferencesStorageKey) || '{}')
+    const rate = Number(saved.rate)
+    const voiceURI = typeof saved.voiceURI === 'string'
+      && (saved.voiceURI === '' || saved.voiceURI.startsWith('browser:') || saved.voiceURI.startsWith('gemini:'))
+      ? saved.voiceURI
+      : ''
+    return {
+      voiceURI,
+      rate: Number.isFinite(rate) && rate >= 0.5 && rate <= 2 && Number.isInteger(rate * 10) ? rate : 1,
+    }
+  } catch (error) {
+    console.error('Could not load global audiobook preferences.', error)
+    return { voiceURI: '', rate: 1 }
+  }
+}
+
+function persistAudiobookPreferences() {
+  try {
+    localStorage.setItem(audiobookPreferencesStorageKey, JSON.stringify({
+      voiceURI: state.audiobookVoiceURI,
+      rate: state.audiobookRate,
+    }))
+  } catch (error) {
+    console.error('Could not save global audiobook preferences.', error)
+    showToast('Could not save audiobook preferences.')
+  }
+}
+
 const app = document.querySelector('#app')
 const database = openDatabase()
 const openRouterKeyStorageKey = 'leaf-openrouter-api-key'
@@ -313,6 +350,7 @@ const aiAuthorAliases = [
   'Noa Sterling',
   'Lena Hollis',
 ]
+const savedAudiobookPreferences = loadAudiobookPreferences()
 
 function randomAiAuthorAlias() {
   return aiAuthorAliases[Math.floor(Math.random() * aiAuthorAliases.length)]
@@ -338,6 +376,7 @@ function createWriterState() {
     coverUrl: '',
     coverCandidate: null,
     coverCandidateUrl: '',
+    chapterImageUrls: [],
   }
 }
 
@@ -349,8 +388,8 @@ const state = {
   highlights: [],
   active: null,
   readerPreferences: loadReaderPreferences(),
-  audiobookVoiceURI: '',
-  audiobookRate: 1,
+  audiobookVoiceURI: savedAudiobookPreferences.voiceURI,
+  audiobookRate: savedAudiobookPreferences.rate,
   query: '',
   writer: createWriterState(),
 }
@@ -404,19 +443,6 @@ app.innerHTML = `
 
       <section class="writer-screen" id="writer-screen" hidden>
         <div class="writer-content">
-          <section class="writer-library-loader" id="writer-library-loader" aria-labelledby="writer-library-loader-title">
-            <div class="writer-library-loader__copy">
-              <h2 id="writer-library-loader-title">Edit a book from your library</h2>
-              <p>Load a saved book or resume an unfinished draft in the chapter editor.</p>
-            </div>
-            <label class="writer-field" for="writer-library-book">Book or draft
-              <select id="writer-library-book"><option value="">Choose a book or draft...</option></select>
-            </label>
-            <div class="writer-library-loader__actions">
-              <button class="button button--outline" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
-              <button class="icon-button" type="button" id="delete-writer-draft" aria-label="Delete selected draft" title="Delete selected draft" hidden><i data-lucide="trash-2"></i></button>
-            </div>
-          </section>
           <div class="writer-wizard">
             <section class="writer-wizard-panel" data-wizard-panel="1" aria-labelledby="wizard-connection-title">
               <h2 id="wizard-connection-title">Connect your AI</h2>
@@ -443,7 +469,32 @@ app.innerHTML = `
               </div>
             </section>
 
-            <section class="writer-wizard-panel" data-wizard-panel="2" aria-labelledby="wizard-prompt-title" hidden>
+            <section class="writer-wizard-panel" data-wizard-panel="2" aria-labelledby="wizard-start-title" hidden>
+              <h2 id="wizard-start-title">Start a book</h2>
+              <p class="writer-panel-copy">Create a new book or load one from your library to edit.</p>
+              <div class="writer-start-options">
+                <section class="writer-start-card" aria-labelledby="create-book-title">
+                  <h3 id="create-book-title">Create a new book</h3>
+                  <p>Start with your idea and use AI suggestions to build a new manuscript.</p>
+                  <button class="button button--primary" type="button" id="create-new-book"><i data-lucide="plus"></i><span>Create new book</span></button>
+                </section>
+                <section class="writer-start-card writer-library-loader" id="writer-library-loader" aria-labelledby="writer-library-loader-title">
+                  <div class="writer-library-loader__copy">
+                    <h3 id="writer-library-loader-title">Edit an existing book</h3>
+                    <p>Load a saved book or resume an unfinished draft in the chapter editor.</p>
+                  </div>
+                  <label class="writer-field" for="writer-library-book">Book or draft
+                    <select id="writer-library-book"><option value="">Choose a book or draft...</option></select>
+                  </label>
+                  <div class="writer-library-loader__actions">
+                    <button class="button button--outline" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
+                    <button class="icon-button" type="button" id="delete-writer-draft" aria-label="Delete selected draft" title="Delete selected draft" hidden><i data-lucide="trash-2"></i></button>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section class="writer-wizard-panel" data-wizard-panel="3" aria-labelledby="wizard-prompt-title" hidden>
               <h2 id="wizard-prompt-title">What would you like to read?</h2>
               <p class="writer-panel-copy">Describe the book you have in mind. The AI will use it to shape the chapter suggestions.</p>
               <div class="writer-wizard-fields">
@@ -453,22 +504,21 @@ app.innerHTML = `
                 <label class="writer-field" for="page-count">Pages
                   <input id="page-count" type="number" min="1" value="8" required />
                 </label>
-                <p class="writer-help">About 200 words per page. Length varies by model.</p>
               </div>
             </section>
 
-            <section class="writer-wizard-panel" data-wizard-panel="3" aria-labelledby="wizard-outline-title" hidden>
+            <section class="writer-wizard-panel" data-wizard-panel="4" aria-labelledby="wizard-outline-title" hidden>
               <h2 id="wizard-outline-title">Chapter Suggestions</h2>
               <label class="writer-field" for="outline-revision-request">
               <textarea id="outline-revision-request" rows="2" spellcheck="true" placeholder="Make the middle chapters build more suspense..."></textarea>
               </label>
               <button class="button button--outline outline-revise" type="button" id="revise-outline"><i data-lucide="sparkles"></i><span>Edit Chapters</span></button>
-              <label class="writer-field" for="chapter-outline">Chapter titles, one per line
+              <label class="writer-field" for="chapter-outline">Chapter titles
                 <textarea id="chapter-outline" rows="8" spellcheck="true" placeholder="AI-suggested chapter titles will appear here."></textarea>
               </label>
             </section>
 
-            <section class="writer-wizard-panel" data-wizard-panel="4" aria-labelledby="manuscript-title" hidden>
+            <section class="writer-wizard-panel" data-wizard-panel="5" aria-labelledby="manuscript-title" hidden>
               <div class="manuscript-heading">
                 <div><h2 id="manuscript-title">Adjust your chapter text</h2><p id="draft-stats">Your chapter suggestions are ready.</p></div>
               </div>
@@ -497,10 +547,10 @@ app.innerHTML = `
                 </div>
                 <textarea id="chapter-prompt" rows="2" aria-label="Chapter prompt" placeholder="Guide generation or regeneration, e.g. build tension, sharpen the dialogue, or preserve a key moment."></textarea>
               </div>
-              <textarea class="manuscript-editor" id="manuscript-editor" placeholder="Generate or write the chapter here." spellcheck="true" aria-label="Editable chapter text"></textarea>
+              <div class="manuscript-editor" id="manuscript-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Editable chapter text" data-placeholder="Generate or write the chapter here." spellcheck="true"></div>
             </section>
 
-            <section class="writer-wizard-panel" data-wizard-panel="5" aria-labelledby="wizard-details-title" hidden>
+            <section class="writer-wizard-panel" data-wizard-panel="6" aria-labelledby="wizard-details-title" hidden>
               <div class="manuscript-meta">
                 <label class="writer-field" for="book-title">Title<input id="book-title" type="text" placeholder="Filled from the suggestions" /></label>
                 <label class="writer-field" for="book-author">Author<input id="book-author" type="text" placeholder="Your name or pen name" /></label>
@@ -560,10 +610,10 @@ app.innerHTML = `
                   </div>
                   <div class="cover-card__actions">
                     <label class="button button--outline cover-card__upload" for="cover-input">
-                      <i data-lucide="upload"></i><span>Upload image</span>
+                      <i data-lucide="upload"></i><span>Upload</span>
                       <input id="cover-input" class="cover-card__file" type="file" accept="image/png,image/jpeg" aria-label="Upload a PNG or JPEG cover image" />
                     </label>
-                    <button class="button button--primary" type="button" id="generate-cover"><i data-lucide="sparkles"></i><span>Generate with AI</span></button>
+                    <button class="button button--primary" type="button" id="generate-cover"><span>Generate</span></button>
                     <button class="button button--primary" type="button" id="keep-cover" hidden><i data-lucide="check"></i><span>Keep</span></button>
                     <button class="button button--outline" type="button" id="undo-cover" hidden><i data-lucide="rotate-ccw"></i><span>Undo</span></button>
                   </div>
@@ -575,7 +625,7 @@ app.innerHTML = `
 
             <div class="writer-wizard-nav">
               <button class="button button--outline" type="button" id="wizard-back" disabled>Back</button>
-              <span id="wizard-step-count" aria-live="polite">Step 1 of 5</span>
+              <span id="wizard-step-count" aria-live="polite">Step 1 of 6</span>
               <button class="button button--primary" type="button" id="wizard-next" disabled><span>Continue</span></button>
               <div class="writer-save-actions" hidden>
                 <button class="button button--primary writer-save" type="button" id="save-draft" disabled><span>Save</span></button>
@@ -990,39 +1040,187 @@ function findFirstEpubHeading(node) {
   return null
 }
 
-function textFromEpubNode(node, excludedNode = null) {
+function epubImageFromNode(node, section, book) {
+  const source = node.getAttribute('src')
+    || node.getAttribute('href')
+    || node.getAttribute('xlink:href')
+  if (!source) return null
+
+  let path
+  try {
+    path = resolveEpubResourcePath(section.href, source)
+  } catch {
+    return null
+  }
+  const asset = book.assets.get(path)
+  if (!asset?.mediaType?.startsWith('image/')) return null
+  return {
+    data: new Uint8Array(asset.data),
+    mediaType: asset.mediaType,
+    alt: String(node.getAttribute('alt') || node.getAttribute('aria-label') || ''),
+  }
+}
+
+function epubNavigationFragment(href) {
+  const fragmentIndex = String(href || '').indexOf('#')
+  if (fragmentIndex < 0) return ''
+  try {
+    return decodeURIComponent(href.slice(fragmentIndex + 1))
+  } catch {
+    return href.slice(fragmentIndex + 1)
+  }
+}
+
+function findEpubNodeById(root, id) {
+  if (!root || !id) return null
+  if (root.nodeType === 1) {
+    const tag = epubTagName(root)
+    if ([root.getAttribute('id'), root.getAttribute('xml:id'), tag === 'A' ? root.getAttribute('name') : null].includes(id)) {
+      return root
+    }
+  }
+  for (const child of Array.from(root.childNodes || [])) {
+    const match = findEpubNodeById(child, id)
+    if (match) return match
+  }
+  return null
+}
+
+function findEpubHeadingByTitle(root, title) {
+  if (!root || root.nodeType !== 1) return null
+  const tag = epubTagName(root)
+  if (ignoredEpubTags.has(tag)) return null
+  const titleMatches = normalizeEpubText(root.textContent).toLocaleLowerCase()
+    === normalizeEpubText(title).toLocaleLowerCase()
+  if (/^H[1-6]$/.test(tag) && titleMatches) {
+    return root
+  }
+  for (const child of Array.from(root.childNodes || [])) {
+    const match = findEpubHeadingByTitle(child, title)
+    if (match) return match
+  }
+  return blockEpubTags.has(tag) && titleMatches ? root : null
+}
+
+function epubNavigationMarkers(root, entries) {
+  if (!entries.length) return { markers: null, targets: [] }
+  const markers = new Map()
+  const targets = []
+  const addMarker = (node, entryIndex) => {
+    if (!node) return
+    const entryIndexes = markers.get(node) || []
+    if (!entryIndexes.includes(entryIndex)) entryIndexes.push(entryIndex)
+    markers.set(node, entryIndexes)
+  }
+
+  const resolvedTargets = entries.map((entry) => {
+    const fragment = epubNavigationFragment(entry.href)
+    const fragmentTarget = fragment ? findEpubNodeById(root, fragment) : null
+    const target = fragmentTarget || findEpubHeadingByTitle(root, entry.title)
+    return { entry, fragment, target }
+  })
+  const rootTarget = resolvedTargets.find(({ target }) => target === root)
+  addMarker(root, rootTarget?.entry.entryIndex ?? entries[0].entryIndex)
+  for (const { entry, fragment, target } of resolvedTargets) {
+    if (target) addMarker(target, entry.entryIndex)
+    targets.push({
+      entryIndex: entry.entryIndex,
+      fragmentPresent: Boolean(fragment),
+      targetFound: Boolean(target),
+      targetTag: target ? epubTagName(target) : null,
+    })
+  }
+  return { markers, targets }
+}
+
+function textFromEpubNode(node, excludedNode = null, images = null, section = null, book = null, navigationMarkers = null) {
   if (!node || node === excludedNode) return ''
   if (node.nodeType === 3 || node.nodeType === 4) return node.nodeValue || ''
   if (node.nodeType !== 1) return ''
   const tag = epubTagName(node)
   if (ignoredEpubTags.has(tag)) return ''
-  if (tag === 'BR') return '\n'
+  const markerText = (navigationMarkers?.get(node) || [])
+    .map((entryIndex) => `\uE002${entryIndex}\uE003`)
+    .join('')
+  if (tag === 'BR') return `${markerText}\n`
   if (tag === 'IMG') {
+    const image = images && section && book ? epubImageFromNode(node, section, book) : null
+    if (image) {
+      const imageIndex = images.push(image) - 1
+      return `${markerText}\uE000${imageIndex}\uE001`
+    }
     const alt = node.getAttribute('alt')
-    return alt ? ` ${alt} ` : ''
+    return `${markerText}${alt ? ` ${alt} ` : ''}`
   }
   const text = Array.from(node.childNodes || [])
-    .map((child) => textFromEpubNode(child, excludedNode))
+    .map((child) => textFromEpubNode(child, excludedNode, images, section, book, navigationMarkers))
     .join('')
-  return blockEpubTags.has(tag) && text.trim() ? `${text.trim()}\n\n` : text
+  return `${markerText}${blockEpubTags.has(tag) && text.trim() ? `${text.trim()}\n\n` : text}`
 }
 
-function extractEpubChapter(section, navigationTitle, chapterNumber) {
+function extractEpubSection(section, book, navigationMarkers = null, navigationTitle = '') {
   const root = section.document?.documentElement || section.contents
   if (!root) return null
 
   const heading = findFirstEpubHeading(root)
   const headingTitle = normalizeEpubText(heading?.textContent)
-  const title = normalizeEpubText(navigationTitle) || headingTitle || `Chapter ${chapterNumber}`
-  const excludedHeading = headingTitle.toLocaleLowerCase() === title.toLocaleLowerCase() ? heading : null
-  const content = textFromEpubNode(root, excludedHeading)
+  const title = normalizeEpubText(navigationTitle) || headingTitle || `Chapter ${section.index + 1}`
+  const excludedHeading = !navigationMarkers && headingTitle.toLocaleLowerCase() === title.toLocaleLowerCase() ? heading : null
+  const images = []
+  const normalizedContent = textFromEpubNode(root, excludedHeading, images, section, book, navigationMarkers)
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t\r\f\v]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return content ? { title, content } : null
+  let content = ''
+  let cursor = 0
+  const navigationPositions = []
+  const extractionMarker = /\uE000(\d+)\uE001|\uE002(\d+)\uE003/g
+  for (const match of normalizedContent.matchAll(extractionMarker)) {
+    content += normalizedContent.slice(cursor, match.index)
+    if (match[1] !== undefined) {
+      const image = images[Number(match[1])]
+      if (image) image.position = content.length
+    } else {
+      navigationPositions.push({ entryIndex: Number(match[2]), position: content.length })
+    }
+    cursor = match.index + match[0].length
+  }
+  content += normalizedContent.slice(cursor)
+  if (content.length) {
+    for (const image of images) image.positionRatio = image.position / content.length
+  }
+
+  return content || images.length || navigationPositions.length
+    ? { title, content, images, navigationPositions }
+    : null
+}
+
+function extractEpubChapter(section, navigationTitle, book) {
+  const extracted = extractEpubSection(section, book, null, navigationTitle)
+  return extracted && (extracted.content || extracted.images.length)
+    ? { title: extracted.title, content: extracted.content, images: extracted.images }
+    : null
+}
+
+function stripLeadingChapterHeading(content, title) {
+  const leadingWhitespace = content.length - content.trimStart().length
+  const trimmedContent = content.slice(leadingWhitespace)
+  const firstBlockEnd = trimmedContent.indexOf('\n\n')
+  const firstBlock = firstBlockEnd < 0 ? trimmedContent : trimmedContent.slice(0, firstBlockEnd)
+  if (!title || normalizeEpubText(firstBlock).toLocaleLowerCase() !== normalizeEpubText(title).toLocaleLowerCase()) {
+    return { content: trimmedContent.trimEnd(), removedChars: leadingWhitespace }
+  }
+
+  const afterHeading = firstBlockEnd < 0 ? content.length : leadingWhitespace + firstBlockEnd + 2
+  const remainder = content.slice(afterHeading)
+  const removedWhitespace = remainder.length - remainder.trimStart().length
+  return {
+    content: remainder.trim(),
+    removedChars: afterHeading + removedWhitespace,
+  }
 }
 
 function epubNavigationTitles(items, book, titles = new Map()) {
@@ -1037,17 +1235,184 @@ function epubNavigationTitles(items, book, titles = new Map()) {
 
 async function readEpubChapters(data) {
   const book = parseEpub(data, { lazySections: true })
+  const traceId = createUuid()
   try {
     await book.ready
     const [metadata, navigation] = await Promise.all([book.loaded.metadata, book.loaded.navigation])
     const allSections = book.spine.spineItems || []
     const navigationTitles = epubNavigationTitles(navigation?.toc, book)
-    const chapters = []
+    const navigationItems = epubChapterNavigationItems(navigation?.toc, book.spine)
+    const chapterEntries = navigationItems.length
+      ? navigationItems.map((item) => ({
+        title: normalizeEpubText(item.label),
+        section: item.href ? book.spine.get(item.href) : null,
+        level: item.level,
+      }))
+      : allSections.map((section) => ({
+        title: navigationTitles.get(section.index) || '',
+        section,
+      }))
+    const navigationDiagnostics = navigationItems.map((item, index) => ({
+      entryIndex: index,
+      spineIndex: item.href ? book.spine.get(item.href)?.index ?? null : null,
+      hrefPresent: Boolean(item.href),
+      fragmentPresent: Boolean(epubNavigationFragment(item.href)),
+      level: item.level,
+    }))
+    console.debug('[Leaf AI EPUB import] navigation resolved', {
+      traceId,
+      spineSectionCount: allSections.length,
+      navigationEntryCount: navigationItems.length,
+      navigation: navigationDiagnostics,
+    })
+    await Promise.all(allSections.map((section) => section.load()))
+    const sectionOwners = epubSectionNavigationOwners(allSections, navigationItems, book.spine)
+    const contentByChapter = chapterEntries.map(() => [])
+    const imagesByChapter = chapterEntries.map(() => [])
+    const titleByChapter = chapterEntries.map((entry) => entry.title)
+    const sectionsByChapter = chapterEntries.map(() => [])
+    const navigationEntriesBySection = new Map()
+    const sectionDiagnostics = []
+
+    navigationItems.forEach((item, entryIndex) => {
+      const section = item.href ? book.spine.get(item.href) : null
+      if (!section) return
+      const entries = navigationEntriesBySection.get(section.index) || []
+      entries.push({
+        entryIndex,
+        href: item.href,
+        title: normalizeEpubText(item.label),
+      })
+      navigationEntriesBySection.set(section.index, entries)
+      sectionsByChapter[entryIndex].push(section.index)
+    })
+
+    const appendChapterContent = (chapterIndex, content, images) => {
+      if (!content && !images.length) return
+      const contentOffset = contentByChapter[chapterIndex].reduce((length, part) => length + part.length, 0)
+        + Math.max(0, contentByChapter[chapterIndex].length - 1) * 2
+      imagesByChapter[chapterIndex].push(...images.map((image) => ({
+        ...image,
+        position: image.position + contentOffset,
+      })))
+      contentByChapter[chapterIndex].push(content)
+    }
 
     for (const section of allSections) {
-      const chapter = extractEpubChapter(section, navigationTitles.get(section.index), chapters.length + 1)
-      if (chapter) chapters.push(chapter)
+      const root = section.document?.documentElement || section.contents
+      const linkedEntries = navigationEntriesBySection.get(section.index) || []
+      if (linkedEntries.length) {
+        const { markers, targets } = epubNavigationMarkers(root, linkedEntries)
+        const extracted = extractEpubSection(section, book, markers)
+        sectionDiagnostics.push({
+          spineIndex: section.index,
+          href: section.href,
+          linkedNavigationEntries: linkedEntries.length,
+          targetCount: targets.filter((target) => target.targetFound).length,
+          targets,
+          boundaries: extracted?.navigationPositions || [],
+          rootFound: Boolean(root),
+          rawTextChars: root?.textContent?.length || 0,
+          extractedTextChars: extracted?.content.length || 0,
+          imageCount: extracted?.images.length || 0,
+          segmentCount: extracted?.navigationPositions.length || 0,
+        })
+        if (!extracted) continue
+
+        const boundaries = extracted.navigationPositions
+        for (let boundaryIndex = 0; boundaryIndex < boundaries.length; boundaryIndex += 1) {
+          const boundary = boundaries[boundaryIndex]
+          const nextBoundary = boundaries[boundaryIndex + 1]
+          const start = Math.min(boundary.position, extracted.content.length)
+          const end = Math.min(nextBoundary?.position ?? extracted.content.length, extracted.content.length)
+          const rawContent = extracted.content.slice(start, end)
+          const entry = chapterEntries[boundary.entryIndex]
+          if (!entry) continue
+          const segment = stripLeadingChapterHeading(rawContent, entry.title)
+          const isLastBoundary = boundaryIndex === boundaries.length - 1
+          const images = extracted.images
+            .filter((image) => image.position >= start
+              && (isLastBoundary ? image.position <= end : image.position < end))
+            .map((image) => ({
+              ...image,
+              position: Math.max(0, image.position - start - segment.removedChars),
+            }))
+          if (!segment.content && !images.length) continue
+          if (!titleByChapter[boundary.entryIndex]) titleByChapter[boundary.entryIndex] = entry.title
+          appendChapterContent(boundary.entryIndex, segment.content, images)
+        }
+        continue
+      }
+
+      const ownerIndex = sectionOwners.get(section.index)
+      const owner = chapterEntries[ownerIndex]
+      const heading = root ? findFirstEpubHeading(root) : null
+      if (!owner) {
+        sectionDiagnostics.push({
+          spineIndex: section.index,
+          href: section.href,
+          ownerIndex: ownerIndex ?? null,
+          status: 'no-chapter-owner',
+          rootFound: Boolean(root),
+          rawTextChars: root?.textContent?.length || 0,
+        })
+        continue
+      }
+      const navigationTitle = owner.section?.index === section.index ? owner.title : ''
+      sectionsByChapter[ownerIndex].push(section.index)
+      const chapter = extractEpubChapter(section, navigationTitle, book)
+      sectionDiagnostics.push({
+        spineIndex: section.index,
+        href: section.href,
+        ownerIndex,
+        rootFound: Boolean(root),
+        rawTextChars: root?.textContent?.length || 0,
+        headingFound: Boolean(heading),
+        headingExcluded: Boolean(heading
+          && normalizeEpubText(heading.textContent).toLocaleLowerCase()
+            === (normalizeEpubText(navigationTitle) || normalizeEpubText(heading.textContent)).toLocaleLowerCase()),
+        extractedTextChars: chapter?.content.length || 0,
+        imageCount: chapter?.images.length || 0,
+      })
+      if (!chapter) continue
+      if (!titleByChapter[ownerIndex]) titleByChapter[ownerIndex] = chapter.title
+      appendChapterContent(ownerIndex, chapter.content, chapter.images)
     }
+
+    console.debug('[Leaf AI EPUB import] spine sections extracted', { traceId, sections: sectionDiagnostics })
+    const chaptersBeforeFiltering = chapterEntries.map((entry, index) => {
+      const content = contentByChapter[index].join('\n\n')
+      return {
+        title: entry.title || titleByChapter[index] || `Chapter ${index + 1}`,
+        content,
+        chapterIndex: index,
+        sourceSections: sectionsByChapter[index],
+        images: imagesByChapter[index].map((image) => ({
+          ...image,
+          positionRatio: content.length ? image.position / content.length : 1,
+        })),
+      }
+    })
+    const chapterDiagnostics = chaptersBeforeFiltering.map((chapter) => ({
+      chapterIndex: chapter.chapterIndex + 1,
+      titleChars: chapter.title.length,
+      contentChars: chapter.content.length,
+      imageCount: chapter.images.length,
+      sourceSections: chapter.sourceSections,
+    }))
+    console.debug('[Leaf AI EPUB import] chapters grouped', { traceId, chapters: chapterDiagnostics })
+    if (!chaptersBeforeFiltering[0]?.content.length) {
+      console.warn('[Leaf AI EPUB import] first chapter has no extracted text', {
+        traceId,
+        firstChapter: chapterDiagnostics[0] || null,
+        firstChapterSections: sectionDiagnostics.filter((section) => (
+          chaptersBeforeFiltering[0]?.sourceSections.includes(section.spineIndex)
+        )),
+      })
+    }
+    const chapters = chaptersBeforeFiltering
+      .filter((chapter) => navigationItems.length || chapter.content || chapter.images.length)
+      .map(({ chapterIndex, sourceSections, ...chapter }) => chapter)
 
     let cover = null
     let coverError = null
@@ -1107,6 +1472,15 @@ function showWriter() {
   $('#reader-screen').hidden = true
   $('#writer-screen').hidden = false
   restoreOpenRouterApiKey()
+  if (
+    state.writer.wizardStep === 1
+    && !state.writer.draftId
+    && !state.writer.loadedBookId
+    && $('#openrouter-key').value.trim()
+    && $('#openrouter-model').value
+  ) {
+    state.writer.wizardStep = 2
+  }
   setActiveNavigation('writer')
   renderWriterLibraryOptions()
   updateWriterControls()
@@ -1122,7 +1496,7 @@ function isValidPageCount(pageCount) {
 
 function canContinueWriterStep(step) {
   if (step === 1) return Boolean($('#openrouter-key').value.trim() && $('#openrouter-model').value)
-  if (step === 2) {
+  if (step === 3) {
     const hasCurrentOutline = state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature()
     const canGenerateOutline = $('#openrouter-key').value.trim()
       && $('#openrouter-model').value
@@ -1130,30 +1504,34 @@ function canContinueWriterStep(step) {
       && isValidPageCount(Number($('#page-count').value))
     return Boolean(hasCurrentOutline || canGenerateOutline)
   }
-  if (step === 3) return parseOutline($('#chapter-outline').value).length > 0
-  if (step === 4) return state.writer.chapters.some((chapter) => chapter.content.trim())
+  if (step === 4) return parseOutline($('#chapter-outline').value).length > 0
+  if (step === 5) return state.writer.chapters.some((chapter) => chapter.content.trim() || chapter.images?.length)
   return false
 }
 
 function renderWriterStep() {
   const step = state.writer.wizardStep
   const busy = state.writer.busy
-  $('#writer-library-loader').hidden = step !== 1
+  const libraryLoader = $('#writer-library-loader')
+  const libraryLoaderHidden = step !== 2
+  libraryLoader.hidden = libraryLoaderHidden
+  libraryLoader.inert = libraryLoaderHidden
+  libraryLoader.setAttribute('aria-hidden', String(libraryLoaderHidden))
   document.querySelectorAll('[data-wizard-panel]').forEach((panel) => {
     panel.hidden = Number(panel.dataset.wizardPanel) !== step
   })
-  $('#wizard-step-count').textContent = `Step ${step} of 5`
+  $('#wizard-step-count').textContent = `Step ${step} of 6`
   $('#wizard-back').disabled = busy || step === 1
-  $('#wizard-next').hidden = step === 5
-  $('.writer-save-actions').hidden = step !== 5
+  $('#wizard-next').hidden = step === 2 || step === 6
+  $('.writer-save-actions').hidden = step !== 6
   $('#wizard-next').disabled = busy || !canContinueWriterStep(step)
   const hasCurrentOutline = state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature()
-  const nextLabel = step === 2
+  const nextLabel = step === 3
     ? busy ? 'Suggesting chapters...' : hasCurrentOutline ? 'Review suggestions' : state.writer.outline.length ? 'Regenerate suggestions' : 'Suggest chapters'
     : ({
       1: 'Continue',
-      3: 'Draft chapters',
-      4: 'Book details',
+      4: 'Draft chapters',
+      5: 'Book details',
     })[step] || 'Continue'
   $('#wizard-next').querySelector('span').textContent = nextLabel
 }
@@ -1161,6 +1539,7 @@ function renderWriterStep() {
 function updateWriterControls() {
   const title = $('#book-title').value.trim()
   const busy = state.writer.busy
+  $('#create-new-book').disabled = busy
   const words = state.writer.chapters.reduce((total, chapter) => total + countWords(chapter.content), 0)
   const activeChapter = state.writer.chapters[state.writer.currentChapter]
   const currentChapterWords = countWords(activeChapter?.content)
@@ -1177,7 +1556,7 @@ function updateWriterControls() {
   stopButton.querySelector('span').textContent = stopButton.disabled ? 'Stopping...' : 'Stop generation'
   updateChapterActionButton(activeChapter)
   $('#chapter-previous').disabled = busy || state.writer.currentChapter === 0
-  $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !activeChapter?.content.trim()
+  $('#chapter-next').disabled = busy || state.writer.currentChapter >= state.writer.chapters.length - 1
   $('#remove-chapter').disabled = busy || !activeChapter
   $('#chapter-prompt-current').disabled = busy
   $('#chapter-prompt-all').disabled = busy
@@ -1191,7 +1570,7 @@ function updateWriterControls() {
       || (typeof displayedCover.generatedAuthor === 'string' && displayedCover.generatedAuthor !== coverAuthor))
   $('#cover-title-warning').hidden = !coverTextMismatch
   const canSaveBook = !busy
-    && state.writer.chapters.some((chapter) => chapter.content.trim())
+    && state.writer.chapters.some((chapter) => chapter.content.trim() || chapter.images?.length)
     && Boolean(title)
     && !state.writer.coverCandidate
     && !coverTextMismatch
@@ -1210,7 +1589,7 @@ function updateWriterControls() {
   $('#page-count').disabled = writerSaveInProgress
   $('#chapter-outline').disabled = writerSaveInProgress
   $('#outline-revision-request').disabled = writerSaveInProgress
-  $('#manuscript-editor').readOnly = busy || state.writer.stage !== 'chapters'
+  $('#manuscript-editor').contentEditable = String(!busy && state.writer.stage === 'chapters')
   $('#chapter-prompt').readOnly = busy || state.writer.stage !== 'chapters'
   $('#chapter-workflow').hidden = state.writer.stage !== 'chapters'
   $('#writer-library-book').disabled = busy || (!state.books.length && !state.drafts.length)
@@ -1253,15 +1632,32 @@ function updateChapterActionButton(chapter) {
   }
 }
 
+async function startNewWriterBook() {
+  if (state.writer.busy) return
+  if (writerDraftHasContent()) {
+    try {
+      await flushWriterAutosave()
+    } catch (error) {
+      reportWriterAutosaveError(error)
+      showToast('Could not save your current draft before starting another book.')
+      return
+    }
+  }
+  resetWriterWorkflow()
+  renderWriterLibraryOptions()
+  state.writer.wizardStep = 3
+  updateWriterControls()
+}
+
 function continueWriterWorkflow() {
   const step = state.writer.wizardStep
   if (state.writer.busy) return
-  if (step === 2 && !(state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature())) {
+  if (step === 3 && !(state.writer.outline.length && state.writer.outlinePrompt === outlinePromptSignature())) {
     if (canContinueWriterStep(step)) requestDraft('outline')
     return
   }
   if (!canContinueWriterStep(step)) return
-  if (step === 3) {
+  if (step === 4) {
     const titles = parseOutline($('#chapter-outline').value)
     const previousChapters = state.writer.chapters
     const previousOutline = previousChapters.map((chapter) => chapter.title)
@@ -1275,6 +1671,7 @@ function continueWriterWorkflow() {
       return {
         title,
         content: existing?.content || '',
+        images: existing?.images || [],
         prompt: existing?.prompt || '',
         undoContent: typeof existing?.undoContent === 'string' ? existing.undoContent : null,
       }
@@ -1284,12 +1681,12 @@ function continueWriterWorkflow() {
     if (outlineChanged) {
       state.writer.savedBookId = null
     }
-    state.writer.wizardStep = 4
+    state.writer.wizardStep = 5
     renderCurrentChapter()
     setWriterStatus('Chapter suggestions are set. Generate or edit the chapter text, then continue to your book details.')
     return
   }
-  if (step === 4 && !state.writer.loadedBookId && !$('#book-author').value.trim()) {
+  if (step === 5 && !state.writer.loadedBookId && !$('#book-author').value.trim()) {
     $('#book-author').value = randomAiAuthorAlias()
   }
   state.writer.wizardStep += 1
@@ -1306,6 +1703,29 @@ function returnToPreviousWriterStep() {
 
 function setWriterStatus(message, type = '') {
   if (type === 'error') showToast(message)
+}
+
+function copyWriterImage(image) {
+  if (!image || typeof image !== 'object') return null
+  const { data } = image
+  const bytes = data instanceof Uint8Array
+    ? new Uint8Array(data)
+    : data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : Array.isArray(data) ? new Uint8Array(data) : null
+  const mediaType = String(image.mediaType || '')
+  if (!bytes || !mediaType.startsWith('image/')) return null
+  return {
+    data: bytes,
+    mediaType,
+    alt: String(image.alt || ''),
+    position: Number.isFinite(image.position) ? Math.max(0, image.position) : 0,
+    positionRatio: Number.isFinite(image.positionRatio)
+      ? Math.min(1, Math.max(0, image.positionRatio))
+      : 1,
+  }
 }
 
 function persistOpenRouterApiKey(removeWhenEmpty = false) {
@@ -1356,7 +1776,9 @@ function writerDraftHasContent() {
     || $('#book-topic').value.trim()
     || $('#chapter-outline').value.trim()
     || $('#outline-revision-request').value.trim()
-    || state.writer.chapters.some((chapter) => chapter.content.trim() || String(chapter.prompt || '').trim()),
+    || state.writer.chapters.some((chapter) => chapter.content.trim()
+      || chapter.images?.length
+      || String(chapter.prompt || '').trim()),
   )
 }
 
@@ -1364,6 +1786,9 @@ function createWriterDraftRecord() {
   const chapters = state.writer.chapters.map((chapter) => ({
     title: String(chapter.title || ''),
     content: String(chapter.content || ''),
+    images: Array.isArray(chapter.images)
+      ? chapter.images.map((image) => ({ ...image }))
+      : [],
     prompt: String(chapter.prompt || ''),
     undoContent: typeof chapter.undoContent === 'string' ? chapter.undoContent : null,
   }))
@@ -1381,6 +1806,7 @@ function createWriterDraftRecord() {
       savedBookId: state.writer.savedBookId,
       loadedBookId: state.writer.loadedBookId,
       stage: state.writer.stage,
+      wizardVersion: 3,
       wizardStep: state.writer.wizardStep,
       outline: [...state.writer.outline],
       outlinePrompt: state.writer.outlinePrompt,
@@ -1457,6 +1883,7 @@ async function flushWriterAutosave() {
 function resumeWriterDraft(draft) {
   if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
   if (state.writer.coverCandidateUrl) URL.revokeObjectURL(state.writer.coverCandidateUrl)
+  clearManuscriptEditorImages()
   const savedWriter = draft.writer || {}
   const fields = draft.fields || {}
   const chapters = Array.isArray(savedWriter.chapters)
@@ -1465,12 +1892,20 @@ function resumeWriterDraft(draft) {
       .map((chapter, index) => ({
         title: String(chapter.title || `Chapter ${index + 1}`),
         content: String(chapter.content || ''),
+        images: Array.isArray(chapter.images) ? chapter.images.map(copyWriterImage).filter(Boolean) : [],
         prompt: String(chapter.prompt || ''),
         undoContent: typeof chapter.undoContent === 'string' ? chapter.undoContent : null,
       }))
     : []
   const savedStep = Number(savedWriter.wizardStep)
-  const wizardStep = Number.isInteger(savedStep) && savedStep >= 1 && savedStep <= 5 ? savedStep : 1
+  const savedWizardVersion = Number(savedWriter.wizardVersion)
+  const normalizedSavedStep = Number.isInteger(savedStep)
+    ? savedWizardVersion >= 2 ? savedStep : savedStep + 1
+    : savedWizardVersion >= 3 ? 1 : 2
+  const migratedSavedStep = savedWizardVersion >= 3
+    ? normalizedSavedStep
+    : normalizedSavedStep === 1 ? 2 : normalizedSavedStep === 2 ? 1 : normalizedSavedStep
+  const wizardStep = migratedSavedStep >= 1 && migratedSavedStep <= 6 ? migratedSavedStep : 1
   const savedChapter = Number(savedWriter.currentChapter)
 
   state.writer = {
@@ -1479,7 +1914,7 @@ function resumeWriterDraft(draft) {
     savedBookId: state.books.some((book) => book.id === savedWriter.savedBookId) ? savedWriter.savedBookId : null,
     loadedBookId: savedWriter.loadedBookId || null,
     stage: savedWriter.stage === 'chapters' && chapters.length ? 'chapters' : 'outline',
-    wizardStep: chapters.length || wizardStep < 4 ? wizardStep : 3,
+    wizardStep: chapters.length || wizardStep < 5 ? wizardStep : 4,
     outline: Array.isArray(savedWriter.outline) ? savedWriter.outline.map((title) => String(title)) : [],
     outlinePrompt: String(savedWriter.outlinePrompt || ''),
     chapters,
@@ -1516,7 +1951,7 @@ function resumeWriterDraft(draft) {
     $('#manuscript-title').textContent = 'Adjust your chapter text'
     $('#chapter-position').textContent = 'Chapter 1 of 1'
     $('#chapter-prompt').value = ''
-    $('#manuscript-editor').value = ''
+    clearManuscriptEditorImages()
   }
   showWriter()
   setWriterStatus(`Resumed "${draft.title || 'Untitled draft'}".`)
@@ -1530,28 +1965,174 @@ function setWriterBusy(busy, mode = '') {
     ? 'Generating background...'
     : busy && mode === 'cover-title'
       ? 'Adding title...'
-      : 'Generate with AI'
+      : 'Generate'
   $('#writer-screen').classList.toggle('writer-screen--busy', busy)
+}
+
+const chapterPrefixPattern = /^\s*(?:[-*]\s*|\d+\s*[.)]\s*|chapter\s+\d+\s*[:.-]?\s*)/i
+
+function stripChapterPrefix(line) {
+  return String(line).trim().replace(chapterPrefixPattern, '').trim()
 }
 
 function parseOutline(text) {
   return String(text).split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !/^title\s*:/i.test(line))
-    .map((line) => line.replace(/^(?:[-*]\s*|\d+\s*[.)]\s*|chapter\s+\d+\s*[:.-]?\s*)/i, '').replace(/^[#`*_\s]+|[#`*_\s]+$/g, '').trim())
+    .map((line) => stripChapterPrefix(line).replace(/^[#`*_\s]+|[#`*_\s]+$/g, '').trim())
     .filter(Boolean)
+}
+
+function normalizeChapterOutlineInput(editor) {
+  const original = editor.value
+  const lines = original.split('\n')
+  let chapterNumber = 0
+  const formattedLines = lines.map((line) => {
+    const trimmed = line.trim()
+    if (/^title\s*:/i.test(trimmed)) return line
+    const hasPrefix = chapterPrefixPattern.test(line)
+    const title = stripChapterPrefix(line)
+    if (!title && !hasPrefix) return ''
+    chapterNumber += 1
+    return `${chapterNumber}. ${title}`
+  })
+  const formatted = formattedLines.join('\n')
+  if (formatted === original) return
+
+  const mapPosition = (position) => {
+    const before = original.slice(0, position)
+    const lineIndex = before.split('\n').length - 1
+    const lineStart = before.lastIndexOf('\n') + 1
+    const oldLine = lines[lineIndex] || ''
+    const newLine = formattedLines[lineIndex] || ''
+    const newLineStart = formattedLines
+      .slice(0, lineIndex)
+      .reduce((offset, line) => offset + line.length + 1, 0)
+    if (/^title\s*:/i.test(oldLine.trim())) {
+      return newLineStart + Math.min(position - lineStart, newLine.length)
+    }
+
+    const oldTitleStart = oldLine.match(chapterPrefixPattern)?.[0].length
+      ?? oldLine.length - oldLine.trimStart().length
+    const newTitleStart = newLine.match(chapterPrefixPattern)?.[0].length
+      ?? newLine.length - newLine.trimStart().length
+    const titleOffset = Math.max(0, position - lineStart - oldTitleStart)
+    const titleLength = stripChapterPrefix(newLine).length
+    return newLineStart + newTitleStart + Math.min(titleOffset, titleLength)
+  }
+
+  const start = mapPosition(editor.selectionStart)
+  const end = mapPosition(editor.selectionEnd)
+  const direction = editor.selectionDirection
+  editor.value = formatted
+  editor.setSelectionRange(start, end, direction)
+}
+
+function clearManuscriptEditorImages() {
+  for (const url of state.writer.chapterImageUrls) URL.revokeObjectURL(url)
+  state.writer.chapterImageUrls = []
+  $('#manuscript-editor').replaceChildren()
+}
+
+function renderManuscriptEditor(chapter, reuseImages = false) {
+  const editor = $('#manuscript-editor')
+  const reusableImages = reuseImages
+    ? new Map([...editor.querySelectorAll('img[data-chapter-image-index]')]
+      .map((image) => [Number(image.dataset.chapterImageIndex), image]))
+    : new Map()
+  if (!reuseImages) clearManuscriptEditorImages()
+  editor.replaceChildren()
+
+  const images = (chapter.images || []).map((image, index) => {
+    if (!(image.data instanceof Uint8Array) || !image.mediaType?.startsWith('image/')) return null
+    const position = Number.isFinite(image.positionRatio)
+      ? Math.round(Math.min(1, Math.max(0, image.positionRatio)) * chapter.content.length)
+      : Math.min(chapter.content.length, Math.max(0, Number(image.position) || 0))
+    return { image, index, position }
+  }).filter(Boolean).sort((left, right) => left.position - right.position)
+
+  const appendText = (text) => {
+    if (text) editor.append(document.createTextNode(text))
+  }
+  let cursor = 0
+  for (const { image, index, position } of images) {
+    appendText(chapter.content.slice(cursor, position))
+    let preview = reusableImages.get(index)
+    if (!preview) {
+      preview = document.createElement('img')
+      preview.src = URL.createObjectURL(new Blob([image.data], { type: image.mediaType }))
+      state.writer.chapterImageUrls.push(preview.src)
+    }
+    preview.className = 'manuscript-editor__image'
+    preview.dataset.chapterImageIndex = String(index)
+    preview.alt = image.alt || 'Image from the original EPUB chapter'
+    preview.contentEditable = 'false'
+    preview.draggable = false
+    editor.append(preview)
+    cursor = position
+  }
+  appendText(chapter.content.slice(cursor))
+}
+
+function readManuscriptEditor(chapter) {
+  const editor = $('#manuscript-editor')
+  let content = ''
+  const images = []
+  const blockTags = new Set(['DIV', 'P'])
+
+  function appendNode(node) {
+    if (node.nodeType === 3) {
+      content += node.nodeValue || ''
+      return
+    }
+    if (node.nodeType !== 1) return
+
+    const tag = node.tagName
+    if (tag === 'IMG') {
+      const imageIndex = Number(node.dataset.chapterImageIndex)
+      const image = chapter.images?.[imageIndex]
+      if (image) {
+        node.dataset.chapterImageIndex = String(images.length)
+        images.push({ ...image, position: content.length })
+      }
+      return
+    }
+    if (tag === 'BR') {
+      content += '\n'
+      return
+    }
+
+    const isBlock = blockTags.has(tag)
+    if (isBlock && content && !content.endsWith('\n')) content += '\n'
+    const children = [...node.childNodes]
+    children.forEach((child, index) => {
+      appendNode(child)
+      if (isBlock && index < children.length - 1 && !content.endsWith('\n')) content += '\n'
+    })
+  }
+
+  const children = [...editor.childNodes]
+  children.forEach((child, index) => {
+    appendNode(child)
+    if (blockTags.has(child.tagName) && index < children.length - 1 && !content.endsWith('\n')) content += '\n'
+  })
+  if (!editor.textContent && !images.length) content = ''
+  for (const image of images) {
+    image.positionRatio = content.length ? image.position / content.length : 1
+  }
+  return { content, images }
 }
 
 function renderCurrentChapter() {
   const chapter = state.writer.chapters[state.writer.currentChapter]
   if (!chapter) return
   $('#manuscript-title').textContent = chapter.title
-  $('#manuscript-editor').value = chapter.content
+  renderManuscriptEditor(chapter)
   $('#chapter-prompt').value = getCurrentChapterPrompt(chapter)
   renderChapterPromptScope()
   $('#chapter-position').textContent = `Chapter ${state.writer.currentChapter + 1} of ${state.writer.chapters.length}`
   $('#chapter-previous').disabled = state.writer.busy || state.writer.currentChapter === 0
-  $('#chapter-next').disabled = state.writer.busy || state.writer.currentChapter >= state.writer.chapters.length - 1 || !chapter.content.trim()
+  $('#chapter-next').disabled = state.writer.busy || state.writer.currentChapter >= state.writer.chapters.length - 1
   updateWriterControls()
   scheduleWriterAutosave()
 }
@@ -1613,9 +2194,9 @@ function removeCurrentChapter() {
   if (!state.writer.chapters.length) {
     state.writer.currentChapter = 0
     state.writer.stage = 'outline'
-    state.writer.wizardStep = 3
+    state.writer.wizardStep = 4
     $('#chapter-position').textContent = 'No chapters'
-    $('#manuscript-editor').value = ''
+    clearManuscriptEditorImages()
     $('#chapter-prompt').value = getCurrentChapterPrompt(null)
     renderChapterPromptScope()
     updateWriterControls()
@@ -1636,7 +2217,6 @@ function undoGeneratedChapter() {
   if (typeof chapter?.undoContent !== 'string') return
   chapter.content = chapter.undoContent
   chapter.undoContent = null
-  $('#manuscript-editor').value = chapter.content
   renderCurrentChapter()
   setWriterStatus(`Undid the latest generation for "${chapter.title}".`)
 }
@@ -1688,24 +2268,29 @@ async function deleteSelectedWriterDraft() {
     setWriterStatus('That unfinished draft is no longer available.', 'error')
     return
   }
-  if (state.writer.busy && state.writer.draftId === draftId) return
+  const isCurrentDraft = state.writer.draftId === draftId
+  if (state.writer.busy && isCurrentDraft) return
   if (!window.confirm(`Delete the unfinished draft “${draft.title || 'Untitled draft'}”?`)) return
 
-  if (state.writer.draftId === draftId) {
+  if (isCurrentDraft) {
     clearTimeout(writerAutosaveTimer)
     writerAutosaveTimer = null
+    setWriterBusy(true, 'delete-draft')
   }
   try {
+    if (isCurrentDraft) await Promise.all([...writerAutosaveTasks])
     await storeRequest('drafts', 'readwrite', (store) => store.delete(draftId))
   } catch (error) {
     console.error('Could not delete the unfinished draft.', error)
-    if (state.writer.draftId === draftId) scheduleWriterAutosave()
+    if (isCurrentDraft) scheduleWriterAutosave()
     showToast('Could not delete that draft.')
     return
+  } finally {
+    if (isCurrentDraft) setWriterBusy(false)
   }
 
   state.drafts = state.drafts.filter((item) => item.id !== draftId)
-  if (state.writer.draftId === draftId) {
+  if (isCurrentDraft) {
     state.writer.draftId = null
     setWriterStatus('Draft deleted. Continued edits will create a new autosaved draft.')
   }
@@ -1722,6 +2307,11 @@ async function loadLibraryBookIntoWriter(recordId) {
 
   setWriterBusy(true, 'load-book')
   setWriterStatus(`Loading "${record.title || 'Untitled'}" into the chapter editor...`)
+  console.info('[Leaf AI EPUB import] loading selected library book', {
+    recordId: record.id,
+    fileName: record.fileName,
+    inputBytes: record.data?.byteLength ?? null,
+  })
   try {
     const { chapters, metadata, cover, coverError } = await readEpubChapters(record.data)
     if (!chapters.length) throw new Error('No readable chapter text was found in that EPUB.')
@@ -1757,7 +2347,7 @@ async function loadLibraryBookIntoWriter(recordId) {
     $('#chapter-outline').value = chapters.map((chapter, index) => `${index + 1}. ${chapter.title}`).join('\n')
     $('#outline-revision-request').value = ''
     state.writer.outlinePrompt = outlinePromptSignature()
-    state.writer.wizardStep = 4
+    state.writer.wizardStep = 5
     if (record.coverOriginal?.data && record.coverOriginal.mediaType) {
       const source = record.coverOriginal.generatedTitle ? 'ai-titled' : 'ai'
       setWriterCover(
@@ -2079,9 +2669,10 @@ function writerMessages(kind, {
       ? `This is part ${chunkIndex + 1} of ${chunkCount} of the existing chapter. Revise the entire supplied section, preserving its events and details. Do not summarize, omit, or skip any of its content, and keep its length similar. It is only one section of the chapter, so do not add a new introduction or conclusion. `
       : `Write part ${chunkIndex + 1} of ${chunkCount} of this chapter. Continue smoothly from the preceding prose without repeating it. Do not add a new introduction, and do not conclude the chapter until the final part. `
     : ''
+  const targetChapterCount = Math.max(1, Math.ceil(pages / 10))
   const currentSuggestions = parseOutline($('#chapter-outline').value)
   const instruction = kind === 'outline'
-    ? `Suggest a coherent sequence of chapters tailored to this book idea, not a generic outline:\n${topic}\n\nAim for about ${pages} reading pages. Return a suggested title as "Title: ..." on the first line, followed by ${Math.min(8, Math.max(2, Math.ceil(pages / 2)))} chapter titles, one per line, numbered. Do not include descriptions or prose.`
+    ? `Suggest a coherent sequence of chapters tailored to this book idea, not a generic outline:\n${topic}\n\nAim for about ${pages} reading pages, at roughly 200 words per page. Bias toward one chapter per 2,000 words (about one chapter per 10 pages), so target around ${targetChapterCount} chapters. Return a suggested title as "Title: ..." on the first line, followed by about ${targetChapterCount} chapter titles, one per line, numbered. Do not default to eight chapters unless that is close to the target, and adjust the target only when the book's pacing clearly calls for it. Do not include descriptions or prose.`
     : kind === 'outline-revision'
       ? `Revise these chapter suggestions to follow the request while staying true to the book idea:\n${topic}\n\nCurrent chapter suggestions:\n${currentSuggestions.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\nRequested changes:\n${$('#outline-revision-request').value.trim()}\n\nKeep the existing number of chapters unless the request suggests otherwise. Return only the revised chapter titles, one per line, numbered. Do not include a book title, descriptions, or prose.`
       : existingDraft
@@ -2128,7 +2719,7 @@ async function requestDraft(kind) {
     $('#chapter-outline').value = titles.map((title, index) => `${index + 1}. ${title}`).join('\n')
     if (state.writer.suggestedTitle) $('#book-title').value = state.writer.suggestedTitle
     else if (!$('#book-title').value.trim()) $('#book-title').value = topic.slice(0, 72)
-    state.writer.wizardStep = 3
+    state.writer.wizardStep = 4
     updateWriterControls()
     scheduleWriterAutosave()
     setWriterStatus(`AI suggested ${titles.length} chapters from your book idea. Adjust the list before drafting.`)
@@ -2193,7 +2784,7 @@ async function requestChapterDrafts() {
         showToast(`Long chapter work is split across ${chunkCount} AI requests. Provider charges may apply.`)
         notifiedAboutChunking = true
       }
-      editor.value = previous
+      renderManuscriptEditor(chapter)
       editor.scrollTop = 0
       $('#chapter-prompt').value = getCurrentChapterPrompt(chapter)
       $('#chapter-position').textContent = `Chapter ${chapterIndex + 1} of ${state.writer.chapters.length}`
@@ -2222,7 +2813,7 @@ async function requestChapterDrafts() {
           signal: chapterGenerationController?.signal,
           onUpdate: (text) => {
             chapter.content = [...revisedSegments, text].join('\n\n')
-            editor.value = chapter.content
+            renderManuscriptEditor(chapter, true)
             scrollManuscriptToBottom(editor)
             updateWriterControls()
             scheduleWriterAutosave()
@@ -2230,7 +2821,7 @@ async function requestChapterDrafts() {
         })
         revisedSegments.push(result)
         chapter.content = revisedSegments.join('\n\n')
-        editor.value = chapter.content
+        renderManuscriptEditor(chapter, true)
         scrollManuscriptToBottom(editor)
         updateWriterControls()
         scheduleWriterAutosave()
@@ -2258,7 +2849,7 @@ async function requestChapterDrafts() {
       chapter.undoContent = activeChapterDraft.undoContent ?? null
     }
     if (state.writer.chapters[state.writer.currentChapter]) renderCurrentChapter()
-    else editor.value = ''
+    else clearManuscriptEditorImages()
     if (stopped) {
       const message = 'Chapter generation stopped. Completed chapters and current partial text were kept.'
       setWriterStatus(message)
@@ -2328,6 +2919,36 @@ async function reviseOutline() {
   }
 }
 
+function resetWriterWorkflow() {
+  clearTimeout(writerAutosaveTimer)
+  writerAutosaveTimer = null
+  if (state.writer.coverUrl) URL.revokeObjectURL(state.writer.coverUrl)
+  if (state.writer.coverCandidateUrl) URL.revokeObjectURL(state.writer.coverCandidateUrl)
+  clearManuscriptEditorImages()
+  state.writer = createWriterState()
+
+  $('#writer-library-book').value = ''
+  $('#book-topic').value = ''
+  $('#page-count').value = '8'
+  $('#chapter-outline').value = ''
+  $('#outline-revision-request').value = ''
+  $('#book-title').value = ''
+  $('#book-author').value = ''
+  $('#cover-art-style').value = 'photographic'
+  $('#cover-mood').value = ''
+  $('#cover-input').value = ''
+  $('#chapter-prompt').value = ''
+  $('#chapter-prompt').hidden = false
+  $('#chapter-prompt-toggle').setAttribute('aria-expanded', 'true')
+  $('#manuscript-title').textContent = 'Adjust your chapter text'
+  $('#chapter-position').textContent = 'Chapter 1 of 1'
+  clearManuscriptEditorImages()
+
+  renderWriterCoverPreview()
+  renderChapterPromptScope()
+  updateWriterControls()
+}
+
 async function saveWriterBook() {
   if (writerSaveInProgress || state.writer.busy) return
   writerSaveInProgress = true
@@ -2338,8 +2959,12 @@ async function saveWriterBook() {
     await Promise.all([...writerAutosaveTasks])
     const title = $('#book-title').value.trim()
     const chapters = state.writer.chapters
-      .filter((chapter) => chapter.content.trim())
-      .map((chapter) => ({ title: chapter.title, content: chapter.content }))
+      .filter((chapter) => chapter.content.trim() || chapter.images?.length)
+      .map((chapter) => ({
+        title: chapter.title,
+        content: chapter.content,
+        images: Array.isArray(chapter.images) ? chapter.images.map(copyWriterImage).filter(Boolean) : [],
+      }))
     if (!title || !chapters.length) return
 
     const authorField = $('#book-author')
@@ -2386,13 +3011,9 @@ async function saveWriterBook() {
     })
     state.books.push(record)
     state.drafts = state.drafts.filter((draft) => !draftIdsToRemove.has(draft.id))
-    state.writer.draftId = null
-    state.writer.savedBookId = id
-    state.writer.wizardStep = 1
-    renderWriterLibraryOptions()
-    updateWriterControls()
+    resetWriterWorkflow()
     renderLibrary()
-    setWriterStatus('A copy is saved to your library. Keep revising here to save another copy.')
+    setWriterStatus('A copy is saved to your library. The AI workflow is ready for another book.')
     showToast('A copy of your book is on the shelf.')
   } finally {
     writerSaveInProgress = false
@@ -2888,20 +3509,15 @@ function availableAudiobookVoices() {
 }
 
 function renderAudiobookVoices() {
-  const voices = availableAudiobookVoices()
-  if (
-    state.audiobookVoiceURI.startsWith(browserAudiobookVoicePrefix)
-    && voices.length
-    && !voices.some((voice) => `${browserAudiobookVoicePrefix}${speechVoiceKey(voice)}` === state.audiobookVoiceURI)
-  ) {
-    state.audiobookVoiceURI = ''
-  }
+  let preferencesChanged = false
   if (
     state.audiobookVoiceURI.startsWith(geminiAudiobookVoicePrefix)
     && !geminiAudiobookVoices.includes(state.audiobookVoiceURI.slice(geminiAudiobookVoicePrefix.length))
   ) {
     state.audiobookVoiceURI = ''
+    preferencesChanged = true
   }
+  if (preferencesChanged) persistAudiobookPreferences()
   renderAudiobookOptions()
   const menu = $('#audiobook-voice-menu')
   if (!menu.hidden) {
@@ -3035,6 +3651,7 @@ function toggleAudiobookVoiceMenu() {
 
 function setAudiobookVoice(voiceURI) {
   state.audiobookVoiceURI = voiceURI
+  persistAudiobookPreferences()
   const active = state.active
   if (!active?.audiobook.open) {
     renderAudiobookOptions()
@@ -3072,6 +3689,7 @@ function adjustAudiobookRate(direction) {
   const nextIndex = Math.max(0, Math.min(audiobookRates.length - 1, currentIndex + direction))
   if (nextIndex === currentIndex) return
   state.audiobookRate = audiobookRates[nextIndex]
+  persistAudiobookPreferences()
   const active = state.active
   if (!active?.audiobook.open) {
     renderAudiobookOptions()
@@ -3102,15 +3720,34 @@ function renderAudiobookPlayer(active) {
   icons()
 }
 
+function audiobookSentenceRanges(text) {
+  if (typeof Intl.Segmenter === 'function') {
+    return [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(text)]
+      .map(({ segment, index }) => ({ start: index, end: index + segment.length }))
+      .filter(({ start, end }) => text.slice(start, end).trim())
+  }
+
+  const ranges = []
+  const sentenceEnd = /[.!?]+(?:["'’”)\]]+)?(?=\s|$)/gu
+  let start = 0
+  for (const match of text.matchAll(sentenceEnd)) {
+    const end = match.index + match[0].length
+    if (text.slice(start, end).trim()) ranges.push({ start, end })
+    start = end
+  }
+  if (text.slice(start).trim()) ranges.push({ start, end: text.length })
+  return ranges
+}
+
 function renderAudiobookTranscript(active, text, placeholder = 'Press play to read from the current page.') {
   const session = active.audiobook
   const textElement = $('#audiobook-text')
   const transcript = $('#audiobook-transcript')
   const fragment = document.createDocumentFragment()
   session.text = text
-  session.wordOffsets = []
-  session.wordElements = []
-  session.activeWordElement = null
+  session.sentenceOffsets = []
+  session.sentenceElements = []
+  session.activeSentenceElement = null
   session.currentCharIndex = 0
   session.speechText = ''
   session.speechTextOffset = 0
@@ -3123,20 +3760,17 @@ function renderAudiobookTranscript(active, text, placeholder = 'Press play to re
   }
 
   let offset = 0
-  for (const part of text.split(/(\s+)/)) {
-    if (!part) continue
-    if (/^\s+$/.test(part)) {
-      fragment.append(document.createTextNode(part))
-    } else {
-      const word = document.createElement('span')
-      word.className = 'audiobook-player__word'
-      word.textContent = part
-      session.wordOffsets.push({ start: offset, end: offset + part.length })
-      session.wordElements.push(word)
-      fragment.append(word)
-    }
-    offset += part.length
+  for (const range of audiobookSentenceRanges(text)) {
+    if (range.start > offset) fragment.append(document.createTextNode(text.slice(offset, range.start)))
+    const sentence = document.createElement('span')
+    sentence.className = 'audiobook-player__sentence'
+    sentence.textContent = text.slice(range.start, range.end)
+    session.sentenceOffsets.push(range)
+    session.sentenceElements.push(sentence)
+    fragment.append(sentence)
+    offset = range.end
   }
+  if (offset < text.length) fragment.append(document.createTextNode(text.slice(offset)))
   textElement.replaceChildren(fragment)
   transcript.scrollTop = 0
 }
@@ -3158,29 +3792,29 @@ function audiobookTranscriptOffset(session, speechText, sectionIndex) {
   return offset === -1 ? null : offset
 }
 
-function highlightAudiobookWord(active, charIndex) {
+function highlightAudiobookSentence(active, charIndex) {
   const session = active.audiobook
   if (!Number.isFinite(charIndex)) return
-  let wordIndex = session.wordOffsets.findIndex(({ start, end }) => charIndex >= start && charIndex < end)
-  if (wordIndex === -1) wordIndex = session.wordOffsets.findIndex(({ start }) => start >= charIndex)
-  if (wordIndex === -1) return
+  let sentenceIndex = session.sentenceOffsets.findIndex(({ start, end }) => charIndex >= start && charIndex < end)
+  if (sentenceIndex === -1) sentenceIndex = session.sentenceOffsets.findIndex(({ start }) => start >= charIndex)
+  if (sentenceIndex === -1) return
 
   session.currentCharIndex = Math.max(0, charIndex - session.speechTextOffset)
-  const word = session.wordElements[wordIndex]
-  if (word === session.activeWordElement) return
-  session.activeWordElement?.classList.remove('audiobook-player__word--active')
-  session.activeWordElement?.removeAttribute('aria-current')
-  word.classList.add('audiobook-player__word--active')
-  word.setAttribute('aria-current', 'true')
-  session.activeWordElement = word
+  const sentence = session.sentenceElements[sentenceIndex]
+  if (sentence === session.activeSentenceElement) return
+  session.activeSentenceElement?.classList.remove('audiobook-player__sentence--active')
+  session.activeSentenceElement?.removeAttribute('aria-current')
+  sentence.classList.add('audiobook-player__sentence--active')
+  sentence.setAttribute('aria-current', 'true')
+  session.activeSentenceElement = sentence
 
   const transcript = $('#audiobook-transcript')
   const transcriptBounds = transcript.getBoundingClientRect()
-  const wordBounds = word.getBoundingClientRect()
+  const sentenceBounds = sentence.getBoundingClientRect()
   const transcriptMidpoint = transcriptBounds.top + transcript.clientHeight / 2
-  const wordMidpoint = wordBounds.top + wordBounds.height / 2
-  if (wordMidpoint > transcriptMidpoint || wordBounds.top < transcriptBounds.top) {
-    transcript.scrollTop += wordMidpoint - transcriptMidpoint
+  const sentenceMidpoint = sentenceBounds.top + sentenceBounds.height / 2
+  if (sentenceMidpoint > transcriptMidpoint || sentenceBounds.top < transcriptBounds.top) {
+    transcript.scrollTop += sentenceMidpoint - transcriptMidpoint
   }
 }
 
@@ -3516,7 +4150,7 @@ function installGeminiAudiobookChunk(active, generation, prepared) {
   session.speechText = chunk.text
   session.speechTextOffset = 0
   session.currentCharIndex = speechStart
-  if (speechStart > 0) highlightAudiobookWord(active, speechStart)
+  if (speechStart > 0) highlightAudiobookSentence(active, speechStart)
   const initialPage = chunk.pages[session.visibleChunkPageIndex]
   if (initialPage?.cfi && active.rendition.currentLocation()?.start?.cfi !== initialPage.cfi) {
     active.rendition.display(initialPage.cfi).catch((error) => {
@@ -3543,7 +4177,7 @@ function installGeminiAudiobookChunk(active, generation, prepared) {
     const progress = Math.min(1, Math.max(0, audio.currentTime / audio.duration))
     const characterIndex = speechStart + Math.min(spokenLength - 1, Math.floor(progress * spokenLength))
     session.currentCharIndex = characterIndex
-    highlightAudiobookWord(active, characterIndex)
+    highlightAudiobookSentence(active, characterIndex)
     syncGeminiAudiobookReaderPage(active, generation, chunk, characterIndex)
   }
   audio.onended = () => {
@@ -3698,7 +4332,7 @@ function speakAudiobookPage(active, generation, startIndex = 0) {
   const speechStart = Number.isFinite(startIndex)
     ? Math.max(0, Math.min(Math.floor(startIndex), text.length - 1))
     : 0
-  if (speechStart > 0) highlightAudiobookWord(active, transcriptOffset + speechStart)
+  if (speechStart > 0) highlightAudiobookSentence(active, transcriptOffset + speechStart)
   if (!speechSynthesisAvailable()) {
     failAudiobookPlayback(active, new Error('Browser speech is unavailable. Select a Gemini voice to use OpenRouter text-to-speech.'))
     return
@@ -3717,7 +4351,7 @@ function speakAudiobookPage(active, generation, startIndex = 0) {
   }
   utterance.onboundary = (event) => {
     if (!isCurrentAudiobookRequest(active, generation)) return
-    highlightAudiobookWord(active, transcriptOffset + speechStart + event.charIndex)
+    highlightAudiobookSentence(active, transcriptOffset + speechStart + event.charIndex)
   }
   utterance.onerror = (event) => {
     if (!isCurrentAudiobookRequest(active, generation)) return
@@ -3894,6 +4528,7 @@ async function openAudiobookPlayer() {
   session.position = ''
   if (!speechSynthesisAvailable() && !selectedGeminiAudiobookVoice()) {
     state.audiobookVoiceURI = `${geminiAudiobookVoicePrefix}${geminiAudiobookVoices[0]}`
+    persistAudiobookPreferences()
   }
   session.message = speechSynthesisAvailable()
     ? 'Ready to read from the current page.'
@@ -4348,9 +4983,9 @@ async function openBook(id) {
       geminiVoice: '',
       visibleChunkPageIndex: 0,
       text: '',
-      wordOffsets: [],
-      wordElements: [],
-      activeWordElement: null,
+      sentenceOffsets: [],
+      sentenceElements: [],
+      activeSentenceElement: null,
       currentCharIndex: 0,
       speechText: '',
       speechTextOffset: 0,
@@ -4437,12 +5072,7 @@ async function openBook(id) {
 }
 
 function renderToc(items, book, pageOffsets = null, depth = 0) {
-  const flattened = []
-  const visit = (entries, level) => entries.forEach((entry) => {
-    flattened.push({ ...entry, level })
-    if (entry.subitems?.length) visit(entry.subitems, level + 1)
-  })
-  visit(items, depth)
+  const flattened = flattenEpubNavigation(items, depth)
   $('#chapter-list').innerHTML = flattened.map((item) => {
     const section = item.href ? book.spine.get(item.href) : null
     const offset = section ? pageOffsets?.[section.index] : null
@@ -4505,9 +5135,50 @@ function renderBookmarks() {
   $('#bookmark-list').innerHTML = `
     ${bookmarkItems || '<p class="toc-empty">No bookmarks in this book yet.</p>'}
     <h3 class="bookmark-section-title">Highlights <small>${highlights.length}</small></h3>
+    <button class="button button--outline bookmark-export-highlights" id="export-highlights" type="button" ${highlights.length ? '' : 'disabled'}>
+      <i data-lucide="download" aria-hidden="true"></i><span>Export highlights as text</span>
+    </button>
     ${highlightItems || '<p class="toc-empty">No highlights saved in this book yet.</p>'}`
   icons()
   syncBookmarkButton(state.active.rendition.currentLocation()?.start?.cfi)
+}
+
+function exportReaderHighlights() {
+  const active = state.active
+  if (!active) return
+  const highlights = state.highlights
+    .filter((highlight) => highlight.bookId === active.record.id && typeof highlight.text === 'string' && highlight.text.trim())
+    .sort((first, second) => first.createdAt - second.createdAt)
+  if (!highlights.length) {
+    showToast('There are no highlights to export.')
+    return
+  }
+
+  const title = String(active.record.title || 'Untitled book').trim()
+  const lines = [
+    title,
+    active.record.author ? `By ${active.record.author}` : '',
+    '',
+    `Highlights (${highlights.length})`,
+    '',
+  ]
+  highlights.forEach((highlight, index) => {
+    lines.push(`${index + 1}. ${highlight.text.trim()}`, '')
+  })
+
+  const filename = `${title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').trim() || 'book'}-highlights.txt`
+  const url = URL.createObjectURL(new Blob([`${lines.join('\r\n').trimEnd()}\r\n`], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  try {
+    link.click()
+    showToast('Your highlights download has started.')
+  } finally {
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 }
 
 async function navigateToHighlight(rendition, cfiRange) {
@@ -4932,6 +5603,7 @@ function clearReaderUiTimer() {
 
 $('#library-nav').addEventListener('click', showLibrary)
 $('#writer-nav').addEventListener('click', showWriter)
+$('#create-new-book').addEventListener('click', () => startNewWriterBook())
 $('#writer-library-book').addEventListener('change', updateWriterControls)
 $('#load-library-book').addEventListener('click', () => loadSelectedWriterItem())
 $('#delete-writer-draft').addEventListener('click', () => deleteSelectedWriterDraft())
@@ -4996,12 +5668,34 @@ $('#outline-revision-request').addEventListener('input', () => {
   scheduleWriterAutosave()
 })
 $('#chapter-outline').addEventListener('input', () => {
+  normalizeChapterOutlineInput($('#chapter-outline'))
   updateWriterControls()
   scheduleWriterAutosave()
 })
+$('#chapter-outline').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.isComposing) return
+  const editor = event.currentTarget
+  if (editor.selectionStart !== editor.selectionEnd) return
+  const start = editor.selectionStart
+  const lineStart = editor.value.lastIndexOf('\n', start - 1) + 1
+  const lineEnd = editor.value.indexOf('\n', start)
+  const currentLine = editor.value.slice(lineStart, lineEnd < 0 ? editor.value.length : lineEnd)
+  if (!stripChapterPrefix(currentLine) || /^title\s*:/i.test(currentLine.trim())) return
+
+  const chapterCountBefore = editor.value.slice(0, lineStart).split('\n')
+    .filter((line) => stripChapterPrefix(line) && !/^title\s*:/i.test(line.trim()))
+    .length
+  event.preventDefault()
+  editor.setRangeText(`\n${chapterCountBefore + 2}. `, start, start, 'end')
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
+})
 $('#manuscript-editor').addEventListener('input', () => {
   const chapter = state.writer.chapters[state.writer.currentChapter]
-  if (chapter) chapter.content = $('#manuscript-editor').value
+  if (chapter) {
+    const updated = readManuscriptEditor(chapter)
+    chapter.content = updated.content
+    chapter.images = updated.images
+  }
   updateWriterControls()
   scheduleWriterAutosave()
 })
@@ -5216,6 +5910,16 @@ $('#bookmark-close').addEventListener('click', () => {
   $('#bookmarks-button').setAttribute('aria-expanded', 'false')
 })
 $('#bookmark-list').addEventListener('click', async (event) => {
+  const exportHighlights = event.target.closest('#export-highlights')
+  if (exportHighlights) {
+    try {
+      exportReaderHighlights()
+    } catch (error) {
+      console.error('Could not export reader highlights.', error)
+      showToast('Could not export highlights.')
+    }
+    return
+  }
   const highlightRemove = event.target.closest('[data-highlight-remove]')
   if (highlightRemove) {
     const id = highlightRemove.dataset.highlightRemove
