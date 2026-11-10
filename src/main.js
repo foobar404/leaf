@@ -7,6 +7,7 @@ import {
   resolveEpubResourcePath,
 } from './epub-reader/parser.js'
 import { createRendition } from './epub-reader/renderer.js'
+import { localDateKey, normalizeReadingDayRecord } from './reading-days.js'
 import {
   createIcons,
   AlignLeft,
@@ -84,6 +85,7 @@ const iconSet = {
 
 const readerPreferenceDefaults = { fontSize: 100, font: 'serif', fontWeight: 'normal', lineHeight: 1.75, highlightColor: '#f4d78f', theme: 'paper-white', aiBackgroundOpacity: 30, aiBackgroundMode: 'light' }
 const audiobookPreferencesStorageKey = 'leaf-audiobook-preferences'
+const starterBookStorageKey = 'leaf-starter-book-added'
 const readerPageTurnThrottleMs = 150
 const aiStoryReaderTheme = 'ai-story-background'
 const chapterDraftChunkCharacterLimit = 8000
@@ -386,6 +388,7 @@ const state = {
   progress: [],
   bookmarks: [],
   highlights: [],
+  readingDays: [],
   active: null,
   readerPreferences: loadReaderPreferences(),
   audiobookVoiceURI: savedAudiobookPreferences.voiceURI,
@@ -395,6 +398,8 @@ const state = {
 }
 let pendingReadingProgress = null
 let pendingReadingProgressWrite = Promise.resolve()
+let readingSessionWrite = Promise.resolve()
+const readingSessionIdleCapMs = 5 * 60 * 1000
 let writerAutosaveTimer = null
 let writerSaveInProgress = false
 let readerUiTimer = null
@@ -476,7 +481,7 @@ app.innerHTML = `
                 <section class="writer-start-card" aria-labelledby="create-book-title">
                   <h3 id="create-book-title">Create a new book</h3>
                   <p>Start with your idea and use AI suggestions to build a new manuscript.</p>
-                  <button class="button button--primary" type="button" id="create-new-book"><i data-lucide="plus"></i><span>Create new book</span></button>
+                  <button class="button button--primary writer-start-action" type="button" id="create-new-book"><i data-lucide="plus"></i><span>Create new book</span></button>
                 </section>
                 <section class="writer-start-card writer-library-loader" id="writer-library-loader" aria-labelledby="writer-library-loader-title">
                   <div class="writer-library-loader__copy">
@@ -487,7 +492,7 @@ app.innerHTML = `
                     <select id="writer-library-book"><option value="">Choose a book or draft...</option></select>
                   </label>
                   <div class="writer-library-loader__actions">
-                    <button class="button button--outline" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
+                    <button class="button button--primary writer-start-action" type="button" id="load-library-book" disabled><i data-lucide="book-open"></i><span>Load into editor</span></button>
                     <button class="icon-button" type="button" id="delete-writer-draft" aria-label="Delete selected draft" title="Delete selected draft" hidden><i data-lucide="trash-2"></i></button>
                   </div>
                 </section>
@@ -827,7 +832,7 @@ icons()
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('leaf-library', 4)
+    const request = indexedDB.open('leaf-library', 6)
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', { keyPath: 'id' })
@@ -835,6 +840,8 @@ function openDatabase() {
       if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('bookmarks')) db.createObjectStore('bookmarks', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('highlights')) db.createObjectStore('highlights', { keyPath: 'id' })
+      if (db.objectStoreNames.contains('readingSessions')) db.deleteObjectStore('readingSessions')
+      if (!db.objectStoreNames.contains('readingDays')) db.createObjectStore('readingDays', { keyPath: 'bookId' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -870,13 +877,59 @@ async function storeTransaction(storeNames, mode, action) {
 
 async function loadLibrary() {
   try {
-    ;[state.books, state.drafts, state.progress, state.bookmarks, state.highlights] = await Promise.all([
+    ;[state.books, state.drafts, state.progress, state.bookmarks, state.highlights, state.readingDays] = await Promise.all([
       storeRequest('books', 'readonly', (store) => store.getAll()),
       storeRequest('drafts', 'readonly', (store) => store.getAll()),
       storeRequest('progress', 'readonly', (store) => store.getAll()),
       storeRequest('bookmarks', 'readonly', (store) => store.getAll()),
       storeRequest('highlights', 'readonly', (store) => store.getAll()),
+      storeRequest('readingDays', 'readonly', (store) => store.getAll()),
     ])
+    const savedReadingDays = state.readingDays
+    state.readingDays = savedReadingDays.map(normalizeReadingDayRecord)
+    const normalizedRecords = state.readingDays.filter((record, index) => record !== savedReadingDays[index])
+    if (normalizedRecords.length) {
+      try {
+        await storeTransaction('readingDays', 'readwrite', (transaction) => {
+          for (const record of normalizedRecords) transaction.objectStore('readingDays').put(record)
+        })
+      } catch (error) {
+        console.error('Could not normalize saved reading-time metadata.', error)
+        showToast('Could not update saved reading-time metadata.')
+      }
+    }
+    if (state.books.length) {
+      localStorage.setItem(starterBookStorageKey, 'true')
+    } else if (localStorage.getItem(starterBookStorageKey) !== 'true') {
+      const record = {
+        id: createUuid(),
+        title: 'The Lantern in the Window',
+        author: 'Leaf',
+        fileName: 'The-Lantern-in-the-Window.epub',
+        addedAt: Date.now(),
+        data: createEpub({
+          title: 'The Lantern in the Window',
+          author: 'Leaf',
+          chapters: [
+            {
+              title: 'The First Evening',
+              content: 'Every evening, Mara lit the little brass lantern and set it in the window. The village below was already folding itself into dusk: doors closing, kettles singing, footsteps finding their way home.\n\nMara had moved to the hill only a week ago. She knew no one in the village, and the long quiet of the house still felt like a question she had not learned to answer.',
+            },
+            {
+              title: 'A Visitor',
+              content: 'On the seventh evening, a soft knock sounded at the door. A boy stood on the step with a paper parcel tucked under his arm. He had seen the lantern from the road, he said, and wondered if someone might have a match.\n\nMara smiled and brought him inside. They shared tea while the rain tapped at the windows. Before he left, the boy promised to bring his sister next time, and Mara found herself looking forward to the sound of their footsteps.',
+            },
+            {
+              title: 'A Brighter Window',
+              content: 'The following evening, two small figures appeared at the garden gate. The evening after that, a neighbor came with a loaf still warm from the oven. Soon there was always someone to greet when the lantern was lit.\n\nMara had thought the lantern was a way to make the dark feel smaller. Now she knew it could do something more: show someone else the way to a welcome.',
+            },
+          ],
+        }),
+      }
+      await storeRequest('books', 'readwrite', (store) => store.add(record))
+      state.books = [record]
+      localStorage.setItem(starterBookStorageKey, 'true')
+    }
     renderLibrary()
   } catch (error) {
     showToast('Could not open your library in this browser.')
@@ -885,6 +938,43 @@ async function loadLibrary() {
 }
 
 const progressFor = (id) => state.progress.find((item) => item.id === id)
+
+function readingDaysFor(bookId) {
+  const days = state.readingDays.find((record) => record.bookId === bookId)?.days || []
+  return [...days].sort((a, b) => b.date.localeCompare(a.date))
+}
+
+function totalReadTimeMs(bookId) {
+  return readingDaysFor(bookId).reduce((total, day) => total + (Number(day.durationMs) || 0), 0)
+}
+
+function formatReadTime(milliseconds) {
+  const minutes = Math.floor(milliseconds / 60000)
+  if (minutes < 1) return '<1m'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`
+}
+
+function readingDaySummary(day) {
+  const [year, month, date] = day.date.split('-').map(Number)
+  const label = new Date(year, month - 1, date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const pages = Number.isInteger(day.startPage) && Number.isInteger(day.endPage) ? ` (p. ${day.startPage}–${day.endPage})` : ''
+  const times = Number.isFinite(day.startTime) && Number.isFinite(day.endTime)
+    ? `, ${new Date(day.startTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}–${new Date(day.endTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+    : ''
+  return `${label}: ${formatReadTime(day.durationMs)}${times}${pages}`
+}
+
+function readTimeBadge(bookId) {
+  const readTime = totalReadTimeMs(bookId)
+  if (readTime <= 0) return ''
+  const label = formatReadTime(readTime)
+  const breakdown = readingDaysFor(bookId).slice(0, 7).map(readingDaySummary).join('\n')
+  const title = breakdown ? `Total read time\n${breakdown}` : 'Total read time'
+  return `<span class="book-card__time" aria-label="${escapeHtml(label)} total read time" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`
+}
 const coverColors = ['#a94f43', '#5a4558', '#3f5266', '#9b704f', '#694550', '#566174']
 const bookCoverUrls = new Map()
 const bookCoverLoads = new Set()
@@ -970,7 +1060,8 @@ function renderLibrary() {
           ${coverMarkup(book, index)}
         </button>
         ${progress ? `<span class="book-card__read" aria-label="${progress.percentage || 0}% read">${progress.percentage || 0}%</span>` : ''}
-        <div class="book-card__actions" role="group" aria-label="Actions for ${escapeHtml(book.title)}">
+                ${readTimeBadge(book.id)}
+                <div class="book-card__actions" role="group" aria-label="Actions for ${escapeHtml(book.title)}">
           <button class="book-card__action book-card__download" type="button" data-download="${escapeHtml(book.id)}" aria-label="Download ${escapeHtml(book.title)} as EPUB" title="Download EPUB"><i data-lucide="download"></i></button>
           <button class="book-card__action book-card__remove" type="button" data-remove="${escapeHtml(book.id)}" aria-label="Remove ${escapeHtml(book.title)}" title="Remove book"><i data-lucide="trash-2"></i></button>
         </div>
@@ -4709,6 +4800,7 @@ async function measureBookPageCount(active, token) {
     if (!active.rendition.displayPending) {
       updateReadingPosition(active.rendition.currentLocation(), 'page-count-complete')
     }
+    if (!$('#bookmark-panel').hidden) renderBookmarks()
   } finally {
     try {
       measurementRendition?.destroy()
@@ -4767,7 +4859,8 @@ async function collectReaderPageRanges(active, startCfi, pageLimit, isCurrent) {
     width: `${width}px`,
     height: `${height}px`,
     overflow: 'hidden',
-    visibility: 'hidden',
+    // Keep layout rects available for page-text extraction in the offscreen renderer.
+    visibility: 'visible',
     pointerEvents: 'none',
   })
   document.body.append(container)
@@ -4925,6 +5018,7 @@ async function openBook(id) {
   closeReaderSelectionMenu()
   clearReaderUiTimer()
   if (state.active) {
+    endReadingSession(state.active)
     closeAudiobookPlayer(false)
     cancelBookPageCount(state.active)
     destroyAiStoryBackgrounds(state.active)
@@ -4993,6 +5087,7 @@ async function openBook(id) {
     },
   }
   state.active = active
+  startReadingSession(active)
   applyReaderHighlightColor(active)
   const readerFrame = $('#epub-frame')
   rendition.on('selected', (cfiRange, contents) => {
@@ -5118,13 +5213,22 @@ function renderBookmarks() {
   const highlights = state.highlights
     .filter((highlight) => highlight.bookId === state.active.record.id)
     .sort((first, second) => second.createdAt - first.createdAt)
-  const bookmarkItems = records.map((bookmark) => `
-    <div class="bookmark-item">
-      <button class="chapter-link bookmark-link" type="button" data-bookmark-cfi="${escapeHtml(bookmark.cfi)}">
-        <span>${escapeHtml(bookmark.chapter || 'Reading')}</span><small>${Number.isFinite(bookmark.percentage) ? `${bookmark.percentage}%` : '—%'}</small>
-      </button>
-      <button class="icon-button bookmark-remove" type="button" data-bookmark-remove="${escapeHtml(bookmark.id)}" aria-label="Remove bookmark" title="Remove bookmark"><i data-lucide="x"></i></button>
-    </div>`).join('')
+  const bookmarkItems = records.map((bookmark) => {
+    const totalPages = state.active.pageCountTotal
+    const page = Number.isInteger(bookmark.page)
+      ? bookmark.page
+      : Number.isFinite(bookmark.percentage) && Number.isInteger(totalPages) && totalPages > 0
+        ? Math.max(1, Math.min(totalPages, Math.round((bookmark.percentage / 100) * totalPages)))
+        : null
+    const pageLabel = Number.isInteger(page) && page > 0 ? `Page ${page}` : 'Page —'
+    return `
+      <div class="bookmark-item">
+        <button class="chapter-link bookmark-link" type="button" data-bookmark-cfi="${escapeHtml(bookmark.cfi)}">
+          <span>${escapeHtml(bookmark.chapter || 'Reading')}</span><small>${pageLabel}</small>
+        </button>
+        <button class="icon-button bookmark-remove" type="button" data-bookmark-remove="${escapeHtml(bookmark.id)}" aria-label="Remove bookmark" title="Remove bookmark"><i data-lucide="x"></i></button>
+      </div>`
+  }).join('')
   const highlightItems = highlights.map((highlight) => `
     <div class="bookmark-item">
       <button class="chapter-link bookmark-link highlight-link" type="button" data-highlight-cfi="${escapeHtml(highlight.cfiRange)}" aria-label="Go to highlight: ${escapeHtml(highlight.text)}">
@@ -5217,11 +5321,13 @@ async function toggleBookmark() {
     showToast('Bookmark removed.')
   } else {
     const percentage = Number.parseFloat($('#progress-label').textContent)
+    const page = Number.parseInt($('#page-count-label').textContent.split('/')[0].trim(), 10)
     const bookmark = {
       id: createUuid(),
       bookId: state.active.record.id,
       cfi,
       chapter: $('#chapter-name-label').textContent,
+      page: Number.isInteger(page) && page > 0 ? page : null,
       percentage: Number.isFinite(percentage) ? percentage : null,
       createdAt: Date.now(),
     }
@@ -5321,6 +5427,7 @@ function updateReadingPosition(location) {
   syncBookmarkButton(location.start.cfi)
   if (state.readerPreferences.theme === aiStoryReaderTheme) ensureAiStoryBackground(state.active, location)
   if (percentage === null || active.pendingProgressRestore) return
+  trackReadingSession(active, bookPage)
   pendingReadingProgress = {
     id: record.id,
     cfi: location.start.cfi,
@@ -5352,6 +5459,94 @@ function flushPendingReadingProgress() {
       })
   }
   return pendingReadingProgressWrite
+}
+
+function startReadingSession(active) {
+  active.readingSession = { bookId: active.record.id, lastActivityAt: Date.now(), lastPage: null }
+}
+
+// Each book keeps one record of per-day entries, so time is attributed to the local calendar day it was read.
+function readingDayFor(bookId, date) {
+  let record = state.readingDays.find((item) => item.bookId === bookId)
+  if (!record) {
+    record = { bookId, days: [] }
+    state.readingDays.push(record)
+  }
+  let day = record.days.find((item) => item.date === date)
+  if (!day) {
+    day = { date, durationMs: 0, startPage: null, endPage: null, startTime: null, endTime: null }
+    record.days.push(day)
+  } else {
+    if (!Number.isFinite(day.startTime)) day.startTime = null
+    if (!Number.isFinite(day.endTime)) day.endTime = null
+  }
+  return { record, day }
+}
+
+function saveReadingDays(record) {
+  const snapshot = structuredClone(record)
+  readingSessionWrite = readingSessionWrite
+    .then(() => storeRequest('readingDays', 'readwrite', (store) => store.put(snapshot)))
+    .catch((error) => console.error('Could not save the reading time.', error))
+}
+
+// Idle gaps are capped so a book left open does not inflate the read time.
+function addReadingSessionTime(session, now) {
+  const elapsed = Math.min(Math.max(0, now - session.lastActivityAt), readingSessionIdleCapMs)
+  session.lastActivityAt = now
+  if (elapsed <= 0) return null
+
+  const countedStart = now - elapsed
+  let cursor = countedStart
+  let record = null
+  while (cursor < now) {
+    const date = localDateKey(cursor)
+    const nextDay = new Date(cursor)
+    nextDay.setHours(24, 0, 0, 0)
+    const segmentEnd = Math.min(now, nextDay.getTime())
+    const { record: bookRecord, day } = readingDayFor(session.bookId, date)
+    day.durationMs += segmentEnd - cursor
+    if (day.startTime === null || cursor < day.startTime) day.startTime = cursor
+    if (day.endTime === null || segmentEnd > day.endTime) day.endTime = segmentEnd
+    if (day.startPage === null) day.startPage = session.lastPage
+    day.endPage = session.lastPage
+    record = bookRecord
+    cursor = segmentEnd
+  }
+  return record
+}
+
+function trackReadingSession(active, bookPage) {
+  const session = active.readingSession
+  if (!session || !Number.isInteger(bookPage)) return
+  const now = Date.now()
+  const record = addReadingSessionTime(session, now)
+  session.lastPage = bookPage
+  if (!record) return
+  const { day } = readingDayFor(session.bookId, localDateKey(now))
+  if (day.startPage === null) day.startPage = bookPage
+  day.endPage = bookPage
+  saveReadingDays(record)
+}
+
+function endReadingSession(active) {
+  const session = active?.readingSession
+  if (!session) return
+  const record = addReadingSessionTime(session, Date.now())
+  if (record) saveReadingDays(record)
+  active.readingSession = null
+}
+
+function pauseReadingSession() {
+  const session = state.active?.readingSession
+  if (!session) return
+  const record = addReadingSessionTime(session, Date.now())
+  if (record) saveReadingDays(record)
+}
+
+function resumeReadingSession() {
+  const session = state.active?.readingSession
+  if (session) session.lastActivityAt = Date.now()
 }
 
 function persistReaderPreferences() {
@@ -5535,6 +5730,7 @@ function applyRenditionReaderTheme(rendition, preferences) {
 
 function closeReader() {
   flushPendingReadingProgress()
+  endReadingSession(state.active)
   clearReaderUiTimer()
   closeReaderSelectionMenu()
   closeAudiobookPlayer(false)
@@ -5767,6 +5963,7 @@ $('#book-grid').addEventListener('click', async (event) => {
     await Promise.all([
       storeRequest('books', 'readwrite', (store) => store.delete(id)),
       storeRequest('progress', 'readwrite', (store) => store.delete(id)),
+      storeRequest('readingDays', 'readwrite', (store) => store.delete(id)),
       ...state.highlights.filter((highlight) => highlight.bookId === id)
         .map((highlight) => storeRequest('highlights', 'readwrite', (store) => store.delete(highlight.id))),
       ...state.bookmarks.filter((bookmark) => bookmark.bookId === id)
@@ -5777,6 +5974,7 @@ $('#book-grid').addEventListener('click', async (event) => {
     state.progress = state.progress.filter((item) => item.id !== id)
     state.highlights = state.highlights.filter((highlight) => highlight.bookId !== id)
     state.bookmarks = state.bookmarks.filter((bookmark) => bookmark.bookId !== id)
+    state.readingDays = state.readingDays.filter((record) => record.bookId !== id)
     renderLibrary()
     return
   }
@@ -5786,14 +5984,32 @@ $('#book-grid').addEventListener('click', async (event) => {
 $('#back-button').addEventListener('click', closeReader)
 $('#reader-prev-page').addEventListener('click', () => turnActivePage('prev'))
 $('#reader-next-page').addEventListener('click', () => turnActivePage('next'))
-$('#reader-selection-menu').addEventListener('click', (event) => {
+const readerSelectionMenu = $('#reader-selection-menu')
+let touchSelectionActionPending = false
+readerSelectionMenu.addEventListener('pointerup', (event) => {
+  if (event.pointerType !== 'touch') return
+  const action = event.target.closest?.('[data-reader-selection-action]')?.dataset.readerSelectionAction
+  if (!action) return
+  touchSelectionActionPending = true
+  window.setTimeout(() => { touchSelectionActionPending = false }, 1000)
+  handleReaderSelectionAction(action)
+})
+readerSelectionMenu.addEventListener('click', (event) => {
+  if (touchSelectionActionPending && event.detail > 0) {
+    touchSelectionActionPending = false
+    event.preventDefault()
+    return
+  }
   const action = event.target.closest('[data-reader-selection-action]')?.dataset.readerSelectionAction
   if (!action) return
+  handleReaderSelectionAction(action)
+})
+function handleReaderSelectionAction(action) {
   if (action === 'copy') copyReaderSelection()
   else if (action === 'highlight') toggleReaderSelectionHighlight()
   else if (action === 'definition' || action === 'translation') lookupReaderSelection(action)
   else closeReaderSelectionMenu()
-})
+}
 const readerStage = $('.reader-stage')
 let readerTouchStart = null
 let suppressedReaderTap = null
@@ -6110,6 +6326,7 @@ document.addEventListener('pointerdown', (event) => {
     closeAudiobookVoiceMenu()
   }
   if (!$('#reader-selection-menu').hidden && !target.closest('#reader-selection-menu')) {
+    document.getSelection()?.removeAllRanges()
     closeReaderSelectionMenu()
   }
   if (!readerFontMenu.hidden && !target.closest('#reader-font-picker')) {
@@ -6180,11 +6397,15 @@ document.addEventListener('drop', (event) => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     flushPendingReadingProgress()
+    pauseReadingSession()
     flushWriterAutosave().catch((error) => console.error('Could not autosave before the page became hidden.', error))
+  } else {
+    resumeReadingSession()
   }
 })
 window.addEventListener('pagehide', () => {
   flushPendingReadingProgress()
+  pauseReadingSession()
   flushWriterAutosave().catch((error) => console.error('Could not autosave before leaving the page.', error))
 })
 

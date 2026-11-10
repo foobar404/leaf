@@ -86,6 +86,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .book-card__meta { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 11px 1px 0; }
 .book-card__meta > span { overflow: hidden; color: #302832; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .book-card__read { position: absolute; z-index: 3; top: 8px; right: 8px; padding: 5px 8px; border: 1px solid #ffffff55; border-radius: 999px; color: #fffaf6; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #0008; backdrop-filter: blur(5px); }
+.book-card__time { position: absolute; z-index: 3; top: 8px; left: 8px; padding: 5px 8px; border: 1px solid #ffffff55; border-radius: 999px; color: #fffaf6; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #0008; backdrop-filter: blur(5px); }
 .book-card__actions { position: absolute; z-index: 2; right: 7px; bottom: 7px; left: 7px; display: flex; justify-content: space-between; gap: 5px; }
 .book-card__action { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: white; cursor: pointer; }
 .book-card__action:hover { transform: scale(1.1); }
@@ -357,6 +358,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .writer-start-card h3 { margin: 0; color: #302832; font: 600 19px/1.25 var(--serif); }
 .writer-start-card p { margin: 0; color: #7d7475; font-size: 16px; line-height: 1.5; }
 .writer-start-card > .button { align-self: flex-start; margin-top: auto; }
+.writer-start-action { width: 168px; font-size: 16px; }
 .writer-library-loader { gap: 14px; }
 .writer-library-loader__copy h3 { margin: 0; color: #302832; font: 600 19px/1.25 var(--serif); }
 .writer-library-loader__copy p { max-width: 420px; margin: 0; color: #7d7475; font-size: 16px; line-height: 1.5; }
@@ -517,6 +519,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .writer-start-options { gap: 10px; }
   .writer-start-card { gap: 10px; padding: 16px; }
   .writer-start-card > .button { align-self: stretch; }
+  .writer-start-action { width: 100%; }
   .writer-library-loader__actions { width: 100%; }
   .writer-library-loader__actions > .button { width: 100%; }
   .chapter-navigation { grid-template-areas: "previous position next" "actions actions actions"; gap: 8px; padding: 8px; }
@@ -591,7 +594,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .writer-library-loader .writer-field { gap: 4px; font-size: 12px; }
   .writer-library-loader .writer-field select { min-height: 36px; padding: 7px 8px; font-size: 14px; }
   .writer-library-loader__actions { width: auto; justify-content: center; }
-  .writer-library-loader__actions > .button { width: auto; min-height: 36px; padding: 0 8px; font-size: 12px; }
+  .writer-library-loader__actions > .button { width: 100%; min-height: 40px; padding: 0 8px; }
   .writer-wizard-panel[data-wizard-panel="2"] { padding: 12px; }
   .writer-wizard-panel[data-wizard-panel="2"] > h2 { margin: 0 0 4px; font-size: 20px; }
   .writer-wizard-panel[data-wizard-panel="2"] > .writer-panel-copy { margin-bottom: 10px; font-size: 13px; line-height: 1.35; }
@@ -621,7 +624,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .writer-library-loader .writer-field { gap: 3px; font-size: 11px; }
   .writer-library-loader__actions { flex-direction: column; align-items: stretch; gap: 4px; }
   .writer-library-loader__actions > .button,
-  .writer-start-card > .button { min-height: 30px; padding-inline: 6px; font-size: 11px; }
+  .writer-start-card > .button { min-height: 30px; padding-inline: 6px; }
 }
 
 @media (max-width: 760px) and (max-height: 637px) {

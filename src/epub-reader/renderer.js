@@ -343,6 +343,8 @@ function rangeForNode(node, offset) {
 
 function pointAtEdge(viewport, edge) {
   const bounds = viewport.getBoundingClientRect()
+  const isOffscreen = bounds.right <= 0 || bounds.bottom <= 0 || bounds.left >= window.innerWidth || bounds.top >= window.innerHeight
+  if (isOffscreen) return textPositionAtEdge(viewport, edge)
   const start = edge === 'start'
   const top = start ? bounds.top + 10 : bounds.bottom - 10
   const bottom = start ? bounds.bottom - 10 : bounds.top + 10
@@ -363,7 +365,40 @@ function pointAtEdge(viewport, edge) {
       if (position && viewport.contains(position.node) && position.node.nodeType === 3) return position
     }
   }
-  return null
+  return textPositionAtEdge(viewport, edge)
+}
+
+function textPositionAtEdge(viewport, edge) {
+  // Offscreen renderers cannot use caret hit-testing, but their text still has layout rects.
+  const bounds = viewport.getBoundingClientRect()
+  const walker = document.createTreeWalker(viewport, NodeFilter.SHOW_TEXT)
+  let lastPosition = null
+  let node
+  while ((node = walker.nextNode())) {
+    const text = node.nodeValue || ''
+    if (!text.length) continue
+
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    const intersectsViewport = (rect) => rect.right > bounds.left
+      && rect.left < bounds.right
+      && rect.bottom > bounds.top
+      && rect.top < bounds.bottom
+    if (!Array.from(range.getClientRects()).some(intersectsViewport)) continue
+
+    const firstOffset = edge === 'start' ? 0 : text.length - 1
+    const offsetStep = edge === 'start' ? 1 : -1
+    for (let offset = firstOffset; edge === 'start' ? offset < text.length : offset >= 0; offset += offsetStep) {
+      range.setStart(node, offset)
+      range.setEnd(node, offset + 1)
+      if (!Array.from(range.getClientRects()).some(intersectsViewport)) continue
+      const position = { node, offset: edge === 'start' ? offset : offset + 1 }
+      if (edge === 'start') return position
+      lastPosition = position
+      break
+    }
+  }
+  return lastPosition
 }
 
 function normalizedLocation(section, cfi, page, total, percentage) {
